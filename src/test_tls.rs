@@ -1,8 +1,6 @@
-use std::{
-    io::{stderr, stdout, Read, Write},
-    net::TcpStream,
-    sync::Arc,
-};
+use std::io::{stderr, stdout, Read, Write};
+use std::net::TcpStream;
+use std::sync::Arc;
 
 use rustls_mbedcrypto_provider::mbedtls_crypto_provider;
 use rustls_mbedpki_provider::MbedTlsServerCertVerifier;
