@@ -26,8 +26,24 @@ pub fn verify_remote_attestation(quote: Quote, collateral: SgxCollateral) -> any
 }
 
 fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<()> {
-    let tcb_issuer_chain =
+    let mut tcb_issuer_chain =
         Certificate::from_pem_multiple(collateral.tcb_info_issuer_chain.as_bytes_with_nul())?;
+
+    let tcb_signer = tcb_issuer_chain
+        .iter_mut()
+        .next()
+        .context("expected tcb signer leaf")?
+        .public_key_mut();
+
+    let a = tcb_signer.ec_public().unwrap();
+    let (x, y) = (a.x().unwrap(), a.y().unwrap());
+    let oid = tcb_signer.curve_oid().unwrap();
+    println!("curve_oid => {oid:?}\n[x] => {x}\n[y] => {y}");
+
+    let tcb_info = collateral
+        .tcb_info
+        .as_tcb_info_and_verify(tcb_signer)
+        .context("failed to verify tcb info signature")?;
 
     for cert in &tcb_issuer_chain {
         println!("{:?}", cert);
@@ -141,14 +157,12 @@ fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
     todo!()
 }
 
+#[cfg(test)]
 #[test]
 fn test_verify_integrity() {
-    let json = include_str!("../data/collaterall.json");
+    let json = include_str!("../data/full_collaterall.json");
 
     let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
 
     verify_integrity(collateral, Quote {}).unwrap();
 }
-
-#[test]
-fn test_signature() {}

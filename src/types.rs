@@ -2,12 +2,14 @@ use std::ffi::CString;
 use std::fmt::Display;
 use std::str::FromStr;
 
+use anyhow::{bail, Context};
 use chrono::Utc;
 use mbedtls::bignum::Mpi;
 use mbedtls::ecp::EcPoint;
 use mbedtls::pk::{EcGroup, Pk};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
+use x509_parser::nom::AsBytes;
 
 pub const SECP256R1_OID_STRING: &str = "1.2.840.10045.3.1.7";
 
@@ -56,24 +58,61 @@ pub struct SgxCollateral {
 fn de_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
-    T: FromStr,
-    <T as FromStr>::Err: Display,
+    T: TryFrom<String>,
+    <T as TryFrom<String>>::Error: Display,
 {
     let s = <String>::deserialize(deserializer)?;
-    T::from_str(&s).map_err(de::Error::custom)
+    T::try_from(s).map_err(de::Error::custom)
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct TcbInfoAndSignature {
-    pub tcb_info: TcbInfo,
-    pub signature: String,
+    #[serde(rename = "tcbInfo")]
+    tcb_info_raw: Box<RawValue>,
+    #[serde(with = "hex")]
+    signature: Vec<u8>,
 }
 
-impl FromStr for TcbInfoAndSignature {
-    type Err = serde_json::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde_json::from_str(s)
+impl TryFrom<String> for TcbInfoAndSignature {
+    type Error = serde_json::Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        serde_json::from_str(&value)
+    }
+}
+
+impl TcbInfoAndSignature {
+    pub fn as_tcb_info_and_verify(&self, public_key: &mut Pk) -> anyhow::Result<TcbInfo> {
+        println!("{}", self.tcb_info_raw);
+        let hashtype = mbedtls::hash::Type::Sha256;
+        let mut bytes = [0u8; 64];
+        let len = mbedtls::hash::Md::hash(hashtype, self.tcb_info_raw.get().as_bytes(), &mut bytes)
+            .context("failed to hash tcb info raw")?;
+        let hash = &bytes[0..len];
+
+        public_key
+            .verify(hashtype, hash, &self.signature)
+            .context("invalid tcb info signature")?;
+
+        let tcb_info: TcbInfo =
+            serde_json::from_str(self.tcb_info_raw.get()).context("tcb info")?;
+
+        if tcb_info
+            .tcb_levels
+            .iter()
+            .any(|e| e.tcb.version() != tcb_info.version)
+        {
+            bail!(
+                "mismatched tcb info versions, should all be {:?}",
+                tcb_info.version,
+            );
+        }
+
+        // tcb_type determines how to compare tcb level
+        // currently, only 0 is valid
+        if tcb_info.tcb_type != 0 {
+            bail!("unsupported tcb type {}", tcb_info.tcb_type,);
+        }
+        Ok(tcb_info)
     }
 }
 
@@ -222,9 +261,74 @@ impl Tcb {
 #[cfg(test)]
 #[test]
 fn test_parse_sgx_collateral() {
+    /* Copyright (c) Fortanix, Inc.
+     *
+     * Licensed under the GNU General Public License, version 2 <LICENSE-GPL or
+     * https://www.gnu.org/licenses/gpl-2.0.html> or the Apache License, Version
+     * 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>, at your
+     * option. This file may not be copied, modified, or distributed except
+     * according to those terms. */
+
+    use mbedtls_sys::types::raw_types::{c_int, c_uchar, c_void};
+    use mbedtls_sys::types::size_t;
+    use rand::{Rng, XorShiftRng};
+
+    /// Not cryptographically secure!!! Use for testing only!!!
+    pub struct TestInsecureRandom(XorShiftRng);
+
+    impl mbedtls::rng::RngCallbackMut for TestInsecureRandom {
+        unsafe extern "C" fn call_mut(
+            p_rng: *mut c_void,
+            data: *mut c_uchar,
+            len: size_t,
+        ) -> c_int {
+            (*(p_rng as *mut TestInsecureRandom))
+                .0
+                .fill_bytes(core::slice::from_raw_parts_mut(data, len));
+            0
+        }
+
+        fn data_ptr_mut(&mut self) -> *mut c_void {
+            self as *const _ as *mut _
+        }
+    }
+
+    impl mbedtls::rng::RngCallback for TestInsecureRandom {
+        unsafe extern "C" fn call(p_rng: *mut c_void, data: *mut c_uchar, len: size_t) -> c_int {
+            (*(p_rng as *mut TestInsecureRandom))
+                .0
+                .fill_bytes(core::slice::from_raw_parts_mut(data, len));
+            0
+        }
+
+        fn data_ptr(&self) -> *mut c_void {
+            self as *const _ as *mut _
+        }
+    }
+
+    pub type TestRandom = TestInsecureRandom;
+
+    /// Not cryptographically secure!!! Use for testing only!!!
+    pub fn test_deterministic_rng() -> TestInsecureRandom {
+        TestInsecureRandom(rand::XorShiftRng::new_unseeded())
+    }
+
+    use mbedtls::pk::EcGroupId;
+    let rng = &mut test_deterministic_rng();
+
+    let mut pk = Pk::generate_ec(rng, EcGroupId::SecP256R1).unwrap();
+
+    let hash = [0u8; 32];
+    let mut buf = [0u8; 256];
+    let len = pk
+        .sign(mbedtls::hash::Type::Sha256, &hash, &mut buf, rng)
+        .unwrap();
+    let sig = &buf[..len];
+    pk.verify(mbedtls::hash::Type::Sha256, &hash, sig).unwrap();
+
     let json = include_str!("../data/full_collaterall.json");
     let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
-    println!("{}", serde_json::to_string_pretty(&collat).unwrap());
+    // println!("{}", serde_json::to_string_pretty(&collat).unwrap());
 }
 
 pub struct Quote {}
