@@ -1,4 +1,3 @@
-use std::ffi::CString;
 use std::fmt::Display;
 use std::sync::LazyLock;
 
@@ -37,7 +36,7 @@ pub struct SgxCollateral {
     /// PCK Cert CRL in PEM format
     pub pck_crl: String,
     /// TCB info issuer chain in PEM format
-    pub tcb_info_issuer_chain: CString,
+    pub tcb_info_issuer_chain: String,
     // TCB Info structure
     #[serde(deserialize_with = "de_from_str")]
     pub tcb_info: TcbInfoAndSignature,
@@ -78,8 +77,6 @@ impl TryFrom<String> for TcbInfoAndSignature {
 
 impl TcbInfoAndSignature {
     pub fn as_tcb_info_and_verify(&self, public_key: VerifyingKey) -> anyhow::Result<TcbInfo> {
-        println!("{}", self.tcb_info_raw);
-
         let sig = p256::ecdsa::Signature::from_slice(&self.signature).unwrap();
         public_key
             .verify(self.tcb_info_raw.get().as_bytes(), &sig)
