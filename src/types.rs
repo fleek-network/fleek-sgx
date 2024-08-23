@@ -134,7 +134,7 @@ impl TryFrom<u16> for TcbInfoVersion {
 
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TcbInfo {
+pub struct TcbInfo {
     version: TcbInfoVersion,
     _issue_date: chrono::DateTime<Utc>,
     pub next_update: chrono::DateTime<Utc>,
@@ -158,7 +158,7 @@ pub struct TcbLevel {
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Deserialize, Serialize)]
-pub(crate) enum TcbStatus {
+pub enum TcbStatus {
     UpToDate,
     OutOfDate,
     ConfigurationNeeded,
@@ -171,7 +171,7 @@ pub(crate) enum TcbStatus {
 /// Contains information identifying a TcbLevel.
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug)]
 #[serde(untagged)]
-pub(crate) enum Tcb {
+pub enum Tcb {
     V2(TcbV2),
     V3(TcbV3),
 }
@@ -186,18 +186,18 @@ impl Tcb {
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug)]
-pub(crate) struct TcbV3 {
+pub struct TcbV3 {
     sgxtcbcomponents: [TcbComponentV3; 16],
     pcesvn: u16,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug, Copy)]
-pub(crate) struct TcbComponentV3 {
+pub struct TcbComponentV3 {
     svn: u8,
 }
 
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug)]
-pub(crate) struct TcbV2 {
+pub struct TcbV2 {
     sgxtcbcomp01svn: u8,
     sgxtcbcomp02svn: u8,
     sgxtcbcomp03svn: u8,
@@ -255,7 +255,7 @@ impl Tcb {
 fn test_parse_sgx_collateral() {
     let json = include_str!("../data/full_collaterall.json");
     let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
-    // println!("{}", serde_json::to_string_pretty(&collat).unwrap());
+    println!("{}", serde_json::to_string_pretty(&collat).unwrap());
 }
 
 pub struct Quote {}

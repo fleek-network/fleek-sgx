@@ -1,11 +1,11 @@
-use std::ops::Deref;
-
 use anyhow::{anyhow, bail, Context};
+use pki::TrustStore;
 use types::{Quote, SgxCollateral, INTEL_ROOT_CA};
-use x509_cert::certificate::CertificateInner;
 use x509_cert::crl::CertificateList;
 use x509_cert::der::Decode;
+use x509_cert::Certificate;
 
+mod pki;
 pub mod types;
 
 pub fn verify_remote_attestation(collateral: SgxCollateral, quote: Quote) -> anyhow::Result<()> {
@@ -26,17 +26,63 @@ pub fn verify_remote_attestation(collateral: SgxCollateral, quote: Quote) -> any
 }
 
 fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<()> {
+    // Parse the tcb issuer chain
     let tcb_issuer_chain =
         x509_cert::Certificate::load_pem_chain(collateral.tcb_info_issuer_chain.as_bytes())
             .context("invalid tcb issuer certificate chain")?;
 
-    let tcb_leaf = tcb_issuer_chain
-        .first()
-        .context("issuer chain empty, missing tcb signer leaf")?;
+    let root_ca = tcb_issuer_chain
+        .iter()
+        .last()
+        .context("Tcb issuer chain is empty")?;
 
-    // TODO: validate algorithm identifier oids (ec-with-sha256, prime256v1)
+    // We need to verify the root certificate is self issued
+    if root_ca.tbs_certificate.issuer != root_ca.tbs_certificate.subject {
+        bail!("Root cert authority is not self signed");
+    }
 
-    let tcb_signer = tcb_leaf
+    // We need to verify that the Trusted Root intel key has signed the certificate
+    INTEL_ROOT_CA
+        .verify(root_ca)
+        .map_err(|e| anyhow!("failed to verify root ca certificate: {e}"))?;
+
+    // Parser and verify that the CRL is signed by Intel
+    let pem = pem::parse(collateral.root_ca_crl.as_bytes()).context("invalid root ca crl pem")?;
+    let root_ca_crl =
+        CertificateList::from_der(pem.contents()).context("invalid root ca crl der")?;
+    INTEL_ROOT_CA
+        .verify(&root_ca_crl)
+        .map_err(|e| anyhow!("failed to verify root ca crl: {e}"))?;
+
+    // Now that we have verified the root ca, we can build the initial trust store.
+    let mut trust_store = TrustStore::new(vec![root_ca.clone()])?.with_trusted_crl(root_ca_crl);
+
+    // parse and verify the pck crl chain and add it to the store
+    let pck_crl_issuer_chain =
+        Certificate::load_pem_chain(collateral.pck_crl_issuer_chain.as_bytes())
+            .context("invalid pck crl issuer certificate chain")?;
+    let pck_issuer = trust_store
+        .verify_chain_leaf(pck_crl_issuer_chain)
+        .context("failed to verify pck crl issuer certificate chain")?;
+
+    // parse and verify the pck crl and add it to the store
+    let pem = pem::parse(collateral.pck_crl.as_bytes()).context("invalid pck crl pem")?;
+    let pck_crl = CertificateList::from_der(pem.contents()).context("invalid pck crl der")?;
+    pck_issuer
+        .pk
+        .verify(&pck_crl)
+        .map_err(|e| anyhow!("failed to verify pck crl: {e}"))?;
+    trust_store.push_trusted_crl(pck_crl);
+
+    let tcb_issuer = trust_store
+        .verify_chain_leaf(tcb_issuer_chain)
+        .context("failed to verify tcb issuer chain")?;
+
+    // TODO: validate oids (ec-with-sha256, prime256v1)
+
+    // get the tcb signer public key
+    let tcb_signer = tcb_issuer
+        .cert
         .tbs_certificate
         .subject_public_key_info
         .subject_public_key
@@ -45,90 +91,22 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
     let tcb_signer = p256::ecdsa::VerifyingKey::from_sec1_bytes(tcb_signer)
         .context("invalid tcb signer public key")?;
 
-    let tcb_info = collateral
+    // verify the tcb info, and get the real struct
+    let _tcb_info = collateral
         .tcb_info
         .as_tcb_info_and_verify(tcb_signer)
         .context("failed to verify tcb info signature")?;
 
-    let pem = pem::parse(collateral.root_ca_crl.as_bytes()).context("invalid root ca crl pem")?;
-    let root_ca_crl = x509_cert::crl::CertificateList::from_der(pem.contents())
-        .context("invalid root ca crl der")?;
+    // TODO: verify the quote's support pck certificate chain
 
-    let root_ca = tcb_issuer_chain
-        .iter()
-        .last()
-        .context("Tcb issuer chain is empty")?;
+    // parse and verify the quote identity issuer chain
+    let qe_id_issuer_chain =
+        Certificate::load_pem_chain(collateral.pck_crl_issuer_chain.as_bytes())
+            .context("invalid pck crl issuer certificate chain")?;
+    let _qe_id_issuer = trust_store
+        .verify_chain_leaf(qe_id_issuer_chain)
+        .context("failed to verify pck crl issuer certificate chain")?;
 
-    verify_root_ca(root_ca, &root_ca_crl)?;
-
-    // Now that we verified signed the root certificate we and crl list we can trust them
-
-    //     let mut trusted_crl = Crl::new();
-    //     trusted_crl.push_from_der(&root_crl_der)?;
-    //     trusted_crl.push_from_pem(collateral.pck_crl.as_bytes())?;
-
-    //     let mut trusted_root_ca = List::<Certificate>::new();
-    //     trusted_root_ca.push(root_ca.clone());
-
-    //     let pck_issuer_crl_chain =
-    //         Certificate::from_pem_multiple(collateral.pck_crl_issuer_chain.as_bytes())?;
-
-    //     // todo maybe use this err_info to print better error here
-    //     Certificate::verify(
-    //         &pck_issuer_crl_chain,
-    //         &trusted_root_ca,
-    //         Some(&mut trusted_crl),
-    //         None,
-    //     )?;
-
-    //     Certificate::verify(
-    //         &tcb_issuer_chain,
-    //         &trusted_root_ca,
-    //         Some(&mut trusted_crl),
-    //         None,
-    //     )?;
-
-    //     let pck_cert_chain =
-    // Certificate::from_pem_multiple(collateral.pck_signing_chain.as_bytes())?;
-
-    //     Certificate::verify(
-    //         &pck_cert_chain,
-    //         &trusted_root_ca,
-    //         Some(&mut trusted_crl),
-    //         None,
-    //     )?;
-
-    //     let qe_id_issuer_chain =
-    //         Certificate::from_pem_multiple(collateral.qe_identity_issuer_chain.as_bytes())?;
-
-    //     Certificate::verify(
-    //         &qe_id_issuer_chain,
-    //         &trusted_root_ca,
-    //         Some(&mut trusted_crl),
-    //         None,
-    //     )?;
-
-    Ok(())
-}
-
-fn verify_root_ca(root_ca: &CertificateInner, root_ca_crl: &CertificateList) -> anyhow::Result<()> {
-    // We need to verify the root certificate is self issued
-    if root_ca.tbs_certificate.issuer != root_ca.tbs_certificate.subject {
-        bail!("Root cert authority is not self signed");
-    }
-
-    // We need to verify that the Trusted Root intel key has signed the certificate
-    INTEL_ROOT_CA
-        .deref()
-        .verify(root_ca)
-        .map_err(|e| anyhow!("failed to verify root ca certificate: {e}"))?;
-
-    // Verify that the CRL is signed by Intel
-    INTEL_ROOT_CA
-        .verify(root_ca_crl)
-        .map_err(|e| anyhow!("failed to verify root ca certificate revocation list: {e}"))?;
-
-    // Now we can trust the root ca and the root crl
     Ok(())
 }
 
