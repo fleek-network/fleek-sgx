@@ -11,8 +11,6 @@ pub struct TrustStore {
     pub trusted: BTreeMap<String, TrustedIdentity>,
     /// Trusted certificate revokation list
     pub crl: BTreeSet<String>,
-    /// Intermediary trusted certificates
-    pub intermediary: BTreeMap<String, TrustedIdentity>,
 }
 
 /// Wrapper for a pre-parsed trusted identity for verification
@@ -38,7 +36,6 @@ impl TrustStore {
         Ok(Self {
             trusted: map,
             crl: Default::default(),
-            intermediary: Default::default(),
         })
     }
 
@@ -54,29 +51,20 @@ impl TrustStore {
     /// Verify an untrusted CRL against a trusted or intermediary signer in the store,
     /// and push the new CRL to the store. Does *not* affect or remove any existing
     /// trusted identities in the store.
-    pub fn verify_and_push_crl(&mut self, crl: CertificateList) -> anyhow::Result<()> {
-        let signer = self.find_issuer(crl.tbs_cert_list.issuer.to_string())?;
-
+    pub fn push_unverified_crl(&mut self, crl: CertificateList) -> anyhow::Result<()> {
+        let signer = self.find_issuer(crl.tbs_cert_list.issuer.to_string(), None)?;
         signer
             .pk
             .verify(&crl)
             .map_err(|e| anyhow!("failed to verify crl signature: {e}"))?;
-
         self.push_trusted_crl(crl);
-
         Ok(())
-    }
-
-    /// Append a single trusted crl to the trust store
-    pub fn with_trusted_crl(mut self, crl: CertificateList) -> Self {
-        self.push_trusted_crl(crl);
-        self
     }
 
     /// Verify the leaf node in a certificate chain is rooted in
     /// the trust store and does not use any revoked signatures.
     pub fn verify_chain_leaf(
-        &mut self,
+        &self,
         chain: Vec<CertificateInner>,
     ) -> anyhow::Result<TrustedIdentity> {
         if chain.is_empty() {
@@ -85,6 +73,7 @@ impl TrustStore {
 
         // work through the certificate chain from the root (last) certificate
         let mut chain = chain.iter().rev().peekable();
+        let mut intermediary = BTreeMap::new();
         loop {
             // safety: we
             let cert = chain.next().unwrap();
@@ -93,7 +82,7 @@ impl TrustStore {
 
             // Ensure this cert is not revoked
             self.check_crls(cert)?;
-            let signer = self.find_issuer(issuer)?;
+            let signer = self.find_issuer(issuer, Some(&intermediary))?;
 
             // Validate issuer signature
             signer
@@ -112,11 +101,11 @@ impl TrustStore {
             if chain.peek().is_none() {
                 // If we're the leaf (end) of the chain, discard intermediaries,
                 // and return the verified identity
-                self.intermediary.clear();
+                intermediary.clear();
                 return Ok(ident);
             } else {
                 // Otherwise, push to intermediaries and process the next certificate
-                self.intermediary.insert(subject, ident);
+                intermediary.insert(subject, ident);
             }
         }
     }
@@ -134,13 +123,19 @@ impl TrustStore {
     }
 
     /// Find an issuer in the trusted or intermediary stores
-    fn find_issuer(&self, issuer: String) -> anyhow::Result<&TrustedIdentity> {
+    fn find_issuer<'a>(
+        &'a self,
+        issuer: String,
+        intermediary: Option<&'a BTreeMap<String, TrustedIdentity>>,
+    ) -> anyhow::Result<&'a TrustedIdentity> {
         if let Some(signer) = self.trusted.get(&issuer) {
-            Ok(signer)
-        } else if let Some(signer) = self.intermediary.get(&issuer) {
-            Ok(signer)
-        } else {
-            bail!("failed to find trusted issuer")
+            return Ok(signer);
         }
+        if let Some(intermediary) = intermediary {
+            if let Some(signer) = intermediary.get(&issuer) {
+                return Ok(signer);
+            }
+        }
+        bail!("failed to find trusted issuer")
     }
 }

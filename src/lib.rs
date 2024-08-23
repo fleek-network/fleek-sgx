@@ -32,7 +32,6 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
             .context("invalid tcb issuer certificate chain")?;
 
     let root_ca = tcb_issuer_chain
-        .iter()
         .last()
         .context("Tcb issuer chain is empty")?;
 
@@ -46,16 +45,16 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
         .verify(root_ca)
         .map_err(|e| anyhow!("failed to verify root ca certificate: {e}"))?;
 
-    // Parser and verify that the CRL is signed by Intel
+    // Now that we have verified the root ca, we can build the initial trust store.
+    let mut trust_store = TrustStore::new(vec![root_ca.clone()])?;
+
+    // Parse and verify that the CRL is signed by Intel
     let pem = pem::parse(collateral.root_ca_crl.as_bytes()).context("invalid root ca crl pem")?;
     let root_ca_crl =
         CertificateList::from_der(pem.contents()).context("invalid root ca crl der")?;
-    INTEL_ROOT_CA
-        .verify(&root_ca_crl)
-        .map_err(|e| anyhow!("failed to verify root ca crl: {e}"))?;
-
-    // Now that we have verified the root ca, we can build the initial trust store.
-    let mut trust_store = TrustStore::new(vec![root_ca.clone()])?.with_trusted_crl(root_ca_crl);
+    trust_store
+        .push_unverified_crl(root_ca_crl)
+        .context("failed to verify root ca crl")?;
 
     // parse and verify the pck crl chain and add it to the store
     let pck_crl_issuer_chain =
