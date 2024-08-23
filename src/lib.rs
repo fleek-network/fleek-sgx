@@ -27,9 +27,13 @@ pub fn verify_remote_attestation(quote: Quote, collateral: SgxCollateral) -> any
 
 fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<()> {
     let tcb_issuer_chain =
-        Certificate::from_pem_multiple(collateral.tcb_info_issuer_chain.as_bytes())?;
+        Certificate::from_pem_multiple(collateral.tcb_info_issuer_chain.as_bytes_with_nul())?;
 
+    for cert in &tcb_issuer_chain {
+        println!("{:?}", cert);
+    }
     let (_, root_crl_pem) = parse_x509_pem(collateral.root_ca_crl.as_bytes())?;
+
     let root_crl_der = root_crl_pem.contents;
 
     let root_ca = tcb_issuer_chain
@@ -96,13 +100,15 @@ fn verify_root_ca(root_ca: &Certificate, root_crl_der: &[u8]) -> anyhow::Result<
     // We need to verify that the Trusted Root intel key has signed the certificate
     let sig = root_ca.signature()?;
 
+    let root_as_der = root_ca.as_der();
     let mut bytes = [0; 64];
-    let hash_len = mbedtls::hash::Md::hash(root_ca.digest_type(), root_ca.as_der(), &mut bytes)?;
+    let hash_len =
+        mbedtls::hash::Md::hash(mbedtls::hash::Type::Sha256, root_ca.as_der(), &mut bytes)?;
     let hash = &bytes[0..hash_len];
 
     let mut intel_pub_key = get_intel_pub_key();
-
-    intel_pub_key.verify(root_ca.digest_type(), hash, &sig)?;
+    println!("{:?}", &root_ca.digest_type());
+    intel_pub_key.verify(mbedtls::hash::Type::Sha256, hash, &sig)?;
 
     // Verify that the CRL is signed by Intel
     let (_, root_crl) = CertificateRevocationList::from_der(root_crl_der)?;
@@ -134,3 +140,15 @@ fn verify_tcb_status(/* ...*/) -> anyhow::Result<()> {
 fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
     todo!()
 }
+
+#[test]
+fn test_verify_integrity() {
+    let json = include_str!("../data/collaterall.json");
+
+    let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
+
+    verify_integrity(collateral, Quote {}).unwrap();
+}
+
+#[test]
+fn test_signature() {}
