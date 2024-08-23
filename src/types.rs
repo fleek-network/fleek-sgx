@@ -1,37 +1,30 @@
 use std::ffi::CString;
 use std::fmt::Display;
-use std::str::FromStr;
+use std::sync::LazyLock;
 
 use anyhow::{bail, Context};
 use chrono::Utc;
-use mbedtls::bignum::Mpi;
-use mbedtls::ecp::EcPoint;
-use mbedtls::pk::{EcGroup, EcGroupId, Options, Pk};
+use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::VerifyingKey;
-use p256::elliptic_curve::sec1::FromEncodedPoint;
-use p256::pkcs8::DecodePublicKey;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
-use x509_parser::nom::AsBytes;
+use x509_cert::der::{Any, DecodePem};
 
 pub const SECP256R1_OID_STRING: &str = "1.2.840.10045.3.1.7";
 
-/// Intel public key that signs all root certificates for DCAP
-const INTEL_ROOT_PUB_KEY: &[u8] = &[
-    0x04, 0x0b, 0xa9, 0xc4, 0xc0, 0xc0, 0xc8, 0x61, 0x93, 0xa3, 0xfe, 0x23, 0xd6, 0xb0, 0x2c, 0xda,
-    0x10, 0xa8, 0xbb, 0xd4, 0xe8, 0x8e, 0x48, 0xb4, 0x45, 0x85, 0x61, 0xa3, 0x6e, 0x70, 0x55, 0x25,
-    0xf5, 0x67, 0x91, 0x8e, 0x2e, 0xdc, 0x88, 0xe4, 0x0d, 0x86, 0x0b, 0xd0, 0xcc, 0x4e, 0xe2, 0x6a,
-    0xac, 0xc9, 0x88, 0xe5, 0x05, 0xa9, 0x53, 0x55, 0x8c, 0x45, 0x3f, 0x6b, 0x09, 0x04, 0xae, 0x73,
-    0x94,
-];
+/// Intel SGX Root Certificate Authority
+pub const INTEL_ROOT_CA_PEM: &str = "\
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEC6nEwMDIYZOj/iPWsCzaEKi71OiO
+SLRFhWGjbnBVJfVnkY4u3IjkDYYL0MxO4mqsyYjlBalTVYxFP2sJBK5zlA==
+-----END PUBLIC KEY-----";
 
-pub fn get_intel_pub_key() -> Pk {
-    let ec_group = EcGroup::new(mbedtls::pk::EcGroupId::SecP256R1).unwrap();
-
-    let point = EcPoint::from_binary(&ec_group, INTEL_ROOT_PUB_KEY).unwrap();
-
-    Pk::public_from_ec_components(ec_group, point).unwrap()
-}
+/// Lazily initialized Intel SGX Root Certificate Authority
+pub static INTEL_ROOT_CA: LazyLock<x509_verify::VerifyingKey> = LazyLock::new(|| {
+    let spki =
+        x509_verify::spki::SubjectPublicKeyInfo::<Any, _>::from_pem(INTEL_ROOT_CA_PEM).unwrap();
+    x509_verify::VerifyingKey::try_from(spki).unwrap()
+});
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SgxCollateral {
@@ -84,25 +77,12 @@ impl TryFrom<String> for TcbInfoAndSignature {
 }
 
 impl TcbInfoAndSignature {
-    pub fn as_tcb_info_and_verify(&self, public_key: &mut Pk) -> anyhow::Result<TcbInfo> {
+    pub fn as_tcb_info_and_verify(&self, public_key: VerifyingKey) -> anyhow::Result<TcbInfo> {
         println!("{}", self.tcb_info_raw);
-        let hashtype = mbedtls::hash::Type::Sha256;
-        let mut bytes = [0u8; 64];
-        let len = mbedtls::hash::Md::hash(hashtype, self.tcb_info_raw.get().as_bytes(), &mut bytes)
-            .context("failed to hash tcb info raw")?;
-        let hash = &bytes[0..len];
-        let point = public_key.ec_public().unwrap();
 
-        let pem = public_key.write_public_pem_string().unwrap();
-
-        use p256::ecdsa::signature::Verifier;
-
-        let r: [u8; 32] = self.signature[..32].try_into().unwrap();
-        let s: [u8; 32] = self.signature[32..].try_into().unwrap();
-
-        let pk = p256::ecdsa::VerifyingKey::from_public_key_pem(&pem).unwrap();
         let sig = p256::ecdsa::Signature::from_slice(&self.signature).unwrap();
-        pk.verify(self.tcb_info_raw.get().as_bytes(), &sig)
+        public_key
+            .verify(self.tcb_info_raw.get().as_bytes(), &sig)
             .expect("valid signature, bitch");
 
         let tcb_info: TcbInfo =
@@ -273,71 +253,6 @@ impl Tcb {
 #[cfg(test)]
 #[test]
 fn test_parse_sgx_collateral() {
-    /* Copyright (c) Fortanix, Inc.
-     *
-     * Licensed under the GNU General Public License, version 2 <LICENSE-GPL or
-     * https://www.gnu.org/licenses/gpl-2.0.html> or the Apache License, Version
-     * 2.0 <LICENSE-APACHE or http://www.apache.org/licenses/LICENSE-2.0>, at your
-     * option. This file may not be copied, modified, or distributed except
-     * according to those terms. */
-
-    use mbedtls_sys::types::raw_types::{c_int, c_uchar, c_void};
-    use mbedtls_sys::types::size_t;
-    use rand::{Rng, XorShiftRng};
-
-    /// Not cryptographically secure!!! Use for testing only!!!
-    pub struct TestInsecureRandom(XorShiftRng);
-
-    impl mbedtls::rng::RngCallbackMut for TestInsecureRandom {
-        unsafe extern "C" fn call_mut(
-            p_rng: *mut c_void,
-            data: *mut c_uchar,
-            len: size_t,
-        ) -> c_int {
-            (*(p_rng as *mut TestInsecureRandom))
-                .0
-                .fill_bytes(core::slice::from_raw_parts_mut(data, len));
-            0
-        }
-
-        fn data_ptr_mut(&mut self) -> *mut c_void {
-            self as *const _ as *mut _
-        }
-    }
-
-    impl mbedtls::rng::RngCallback for TestInsecureRandom {
-        unsafe extern "C" fn call(p_rng: *mut c_void, data: *mut c_uchar, len: size_t) -> c_int {
-            (*(p_rng as *mut TestInsecureRandom))
-                .0
-                .fill_bytes(core::slice::from_raw_parts_mut(data, len));
-            0
-        }
-
-        fn data_ptr(&self) -> *mut c_void {
-            self as *const _ as *mut _
-        }
-    }
-
-    pub type TestRandom = TestInsecureRandom;
-
-    /// Not cryptographically secure!!! Use for testing only!!!
-    pub fn test_deterministic_rng() -> TestInsecureRandom {
-        TestInsecureRandom(rand::XorShiftRng::new_unseeded())
-    }
-
-    use mbedtls::pk::EcGroupId;
-    let rng = &mut test_deterministic_rng();
-
-    let mut pk = Pk::generate_ec(rng, EcGroupId::SecP256R1).unwrap();
-
-    let hash = [0u8; 32];
-    let mut buf = [0u8; 256];
-    let len = pk
-        .sign(mbedtls::hash::Type::Sha256, &hash, &mut buf, rng)
-        .unwrap();
-    let sig = &buf[..len];
-    pk.verify(mbedtls::hash::Type::Sha256, &hash, sig).unwrap();
-
     let json = include_str!("../data/full_collaterall.json");
     let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
     // println!("{}", serde_json::to_string_pretty(&collat).unwrap());
