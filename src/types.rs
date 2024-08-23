@@ -6,7 +6,10 @@ use anyhow::{bail, Context};
 use chrono::Utc;
 use mbedtls::bignum::Mpi;
 use mbedtls::ecp::EcPoint;
-use mbedtls::pk::{EcGroup, Pk};
+use mbedtls::pk::{EcGroup, EcGroupId, Options, Pk};
+use p256::ecdsa::VerifyingKey;
+use p256::elliptic_curve::sec1::FromEncodedPoint;
+use p256::pkcs8::DecodePublicKey;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use x509_parser::nom::AsBytes;
@@ -88,10 +91,19 @@ impl TcbInfoAndSignature {
         let len = mbedtls::hash::Md::hash(hashtype, self.tcb_info_raw.get().as_bytes(), &mut bytes)
             .context("failed to hash tcb info raw")?;
         let hash = &bytes[0..len];
+        let point = public_key.ec_public().unwrap();
 
-        public_key
-            .verify(hashtype, hash, &self.signature)
-            .context("invalid tcb info signature")?;
+        let pem = public_key.write_public_pem_string().unwrap();
+
+        use p256::ecdsa::signature::Verifier;
+
+        let r: [u8; 32] = self.signature[..32].try_into().unwrap();
+        let s: [u8; 32] = self.signature[32..].try_into().unwrap();
+
+        let pk = p256::ecdsa::VerifyingKey::from_public_key_pem(&pem).unwrap();
+        let sig = p256::ecdsa::Signature::from_slice(&self.signature).unwrap();
+        pk.verify(self.tcb_info_raw.get().as_bytes(), &sig)
+            .expect("valid signature, bitch");
 
         let tcb_info: TcbInfo =
             serde_json::from_str(self.tcb_info_raw.get()).context("tcb info")?;
