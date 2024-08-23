@@ -8,6 +8,7 @@ use p256::ecdsa::VerifyingKey;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::value::RawValue;
 use x509_cert::der::{Any, DecodePem};
+use x509_cert::Certificate;
 
 pub const SECP256R1_OID_STRING: &str = "1.2.840.10045.3.1.7";
 
@@ -30,24 +31,59 @@ pub struct SgxCollateral {
     /// version = 1. PCK Cert chain is in the Quote.
     pub version: u32,
     /// PCK CRL Issuer Chain in PEM format
-    pub pck_crl_issuer_chain: String,
+    #[serde(with = "de_cert_chain")]
+    pub pck_crl_issuer_chain: Vec<Certificate>,
     /// Root CA CRL in PEM format
     pub root_ca_crl: String,
     /// PCK Cert CRL in PEM format
     pub pck_crl: String,
     /// TCB info issuer chain in PEM format
-    pub tcb_info_issuer_chain: String,
+    #[serde(with = "de_cert_chain")]
+    pub tcb_info_issuer_chain: Vec<Certificate>,
     // TCB Info structure
     #[serde(deserialize_with = "de_from_str")]
     pub tcb_info: TcbInfoAndSignature,
     /// Identity issuer chain in PEM format
-    pub qe_identity_issuer_chain: String,
+    #[serde(with = "de_cert_chain")]
+    pub qe_identity_issuer_chain: Vec<Certificate>,
     /// QE Identity Structure
     pub qe_identity: String,
     /// PCK certificate in PEM format
     pub pck_certificate: String,
     /// PCK signing chain in PEM format
-    pub pck_signing_chain: String,
+    #[serde(with = "de_cert_chain")]
+    pub pck_signing_chain: Vec<Certificate>,
+}
+
+/// Deserialize certificate chains in place
+mod de_cert_chain {
+    use serde::Serializer;
+    use x509_cert::certificate::CertificateInner;
+    use x509_cert::der::EncodePem;
+
+    use super::*;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<CertificateInner>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = <String>::deserialize(deserializer)?;
+        Certificate::load_pem_chain(s.as_bytes()).map_err(de::Error::custom)
+    }
+    pub fn serialize<S: Serializer>(
+        value: &Vec<CertificateInner>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut string = String::new();
+        for cert in value {
+            string.push_str(
+                &cert
+                    .to_pem(p256::pkcs8::LineEnding::CRLF)
+                    .map_err(serde::ser::Error::custom)?,
+            )
+        }
+        serializer.serialize_str(&string)
+    }
 }
 
 fn de_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>

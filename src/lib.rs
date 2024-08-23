@@ -3,7 +3,6 @@ use pki::TrustStore;
 use types::{Quote, SgxCollateral, INTEL_ROOT_CA};
 use x509_cert::crl::CertificateList;
 use x509_cert::der::Decode;
-use x509_cert::Certificate;
 
 mod pki;
 pub mod types;
@@ -26,12 +25,8 @@ pub fn verify_remote_attestation(collateral: SgxCollateral, quote: Quote) -> any
 }
 
 fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<()> {
-    // Parse the tcb issuer chain
-    let tcb_issuer_chain =
-        x509_cert::Certificate::load_pem_chain(collateral.tcb_info_issuer_chain.as_bytes())
-            .context("invalid tcb issuer certificate chain")?;
-
-    let root_ca = tcb_issuer_chain
+    let root_ca = collateral
+        .tcb_info_issuer_chain
         .last()
         .context("Tcb issuer chain is empty")?;
 
@@ -56,12 +51,9 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
         .push_unverified_crl(root_ca_crl)
         .context("failed to verify root ca crl")?;
 
-    // parse and verify the pck crl chain and add it to the store
-    let pck_crl_issuer_chain =
-        Certificate::load_pem_chain(collateral.pck_crl_issuer_chain.as_bytes())
-            .context("invalid pck crl issuer certificate chain")?;
+    // verify the pck crl chain and add it to the store
     let pck_issuer = trust_store
-        .verify_chain_leaf(pck_crl_issuer_chain)
+        .verify_chain_leaf(collateral.pck_crl_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
     // parse and verify the pck crl and add it to the store
@@ -74,7 +66,7 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
     trust_store.push_trusted_crl(pck_crl);
 
     let tcb_issuer = trust_store
-        .verify_chain_leaf(tcb_issuer_chain)
+        .verify_chain_leaf(collateral.tcb_info_issuer_chain)
         .context("failed to verify tcb issuer chain")?;
 
     // TODO: validate oids (ec-with-sha256, prime256v1)
@@ -96,14 +88,14 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
         .as_tcb_info_and_verify(tcb_signer)
         .context("failed to verify tcb info signature")?;
 
-    // TODO: verify the quote's support pck certificate chain
+    // verify the quote's support pck signing certificate chain
+    trust_store
+        .verify_chain_leaf(collateral.pck_signing_chain)
+        .context("failed to verify quote support pck signing certificate chain")?;
 
-    // parse and verify the quote identity issuer chain
-    let qe_id_issuer_chain =
-        Certificate::load_pem_chain(collateral.pck_crl_issuer_chain.as_bytes())
-            .context("invalid pck crl issuer certificate chain")?;
+    // verify the quote identity issuer chain
     let _qe_id_issuer = trust_store
-        .verify_chain_leaf(qe_id_issuer_chain)
+        .verify_chain_leaf(collateral.qe_identity_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
     Ok(())
