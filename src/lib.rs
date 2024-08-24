@@ -2,31 +2,33 @@ use anyhow::{anyhow, bail, Context};
 use pki::TrustStore;
 use types::collateral::SgxCollateral;
 use types::quote::SgxQuote;
+use types::tcb_info::TcbInfo;
 use types::INTEL_ROOT_CA;
 
 mod pki;
-
-pub mod types;
 mod utils;
 
+pub mod types;
+
+/// Verify a remote attestation from a given collateral and quote.
 pub fn verify_remote_attestation(collateral: SgxCollateral, quote: SgxQuote) -> anyhow::Result<()> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
-    //    certificate, and that no keys in the chain have been revoked.
-    verify_integrity(collateral, quote)?;
+    //    certificate, and that no keys in the chain have been revoked by the parent entity.
+    let (tcb_info,) = verify_integrity(&collateral, &quote)?;
 
-    // 3. Verify the Quoting Enclave is from a suitable source and is up to date.
+    // 2. Verify the Quoting Enclave is from a suitable source and is up to date.
     verify_quote()?;
 
-    // 4. Verify the status of the Intel® SGX TCB described in the chain.
-    verify_tcb_status()?;
+    // 3. Verify the status of the Intel® SGX TCB described in the chain.
+    verify_tcb_status(&tcb_info)?;
 
-    // 5. Verify the enclave measurements in the Quote reflect an enclave identity expected.
+    // 4. Verify the enclave measurements in the Quote reflect an enclave identity expected.
     verify_enclave_measurements()?;
 
     Ok(())
 }
 
-fn verify_integrity(collateral: SgxCollateral, _quote: SgxQuote) -> anyhow::Result<()> {
+fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<(TcbInfo,)> {
     let root_ca = collateral
         .tcb_info_issuer_chain
         .last()
@@ -47,12 +49,12 @@ fn verify_integrity(collateral: SgxCollateral, _quote: SgxQuote) -> anyhow::Resu
 
     // Verify that the CRL is signed by Intel and add it to the store
     trust_store
-        .push_unverified_crl(collateral.root_ca_crl)
+        .push_unverified_crl(collateral.root_ca_crl.clone())
         .context("failed to verify root ca crl")?;
 
     // verify the pck crl chain and add it to the store
     let pck_issuer = trust_store
-        .verify_chain_leaf(collateral.pck_crl_issuer_chain)
+        .verify_chain_leaf(&collateral.pck_crl_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
     // verify the pck crl and add it to the store
@@ -60,11 +62,11 @@ fn verify_integrity(collateral: SgxCollateral, _quote: SgxQuote) -> anyhow::Resu
         .pk
         .verify(&collateral.pck_crl)
         .map_err(|e| anyhow!("failed to verify pck crl: {e}"))?;
-    trust_store.push_trusted_crl(collateral.pck_crl);
+    trust_store.push_trusted_crl(collateral.pck_crl.clone());
 
     // verify the tcb info issuer chain
     let tcb_issuer = trust_store
-        .verify_chain_leaf(collateral.tcb_info_issuer_chain)
+        .verify_chain_leaf(&collateral.tcb_info_issuer_chain)
         .context("failed to verify tcb issuer chain")?;
 
     // TODO: validate signature algorithm oids (ec-with-sha256, prime256v1)
@@ -81,31 +83,38 @@ fn verify_integrity(collateral: SgxCollateral, _quote: SgxQuote) -> anyhow::Resu
         .context("invalid tcb signer public key")?;
 
     // verify the tcb info, and get the real struct
-    let _tcb_info = collateral
+    let tcb_info = collateral
         .tcb_info
         .as_tcb_info_and_verify(tcb_signer)
         .context("failed to verify tcb info signature")?;
 
     // verify the quote's support pck signing certificate chain
-    // TODO: get from quote, not collateral
     trust_store
-        .verify_chain_leaf(collateral.pck_signing_chain)
+        .verify_chain_leaf(&quote.support.pck_cert_chain)
         .context("failed to verify quote support pck signing certificate chain")?;
 
     // verify the quote identity issuer chain
     let _qe_id_issuer = trust_store
-        .verify_chain_leaf(collateral.qe_identity_issuer_chain)
+        .verify_chain_leaf(&collateral.qe_identity_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
-    Ok(())
+    Ok((tcb_info,))
 }
 
 fn verify_quote(/* ...*/) -> anyhow::Result<()> {
     todo!()
 }
 
-fn verify_tcb_status(/* ...*/) -> anyhow::Result<()> {
-    todo!()
+/// Ensure the latest tcb info is not revoked, and is either up to date or only needs a
+/// configuration change.
+fn verify_tcb_status(_tcb_info: &TcbInfo) -> anyhow::Result<()> {
+    // TODO:
+    //   - sort tcb info by pcesvn/compsvn
+    //   - ensure status of the latest is either:
+    //      - TcbStatus::UpToDate
+    //      - TcbStatus::ConfigurationNeeded
+
+    Ok(())
 }
 
 fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
@@ -113,13 +122,18 @@ fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-#[test]
-fn test_verify_integrity() {
-    let json = include_str!("../data/full_collaterall.json");
-    let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
-    let der = include_bytes!("../data/our_evidence.bin").to_vec();
-    let mut slice = der.as_slice();
-    let quote = SgxQuote::read(&mut slice).unwrap();
+mod tests {
+    use super::*;
 
-    verify_integrity(collateral, quote).unwrap();
+    #[test]
+    fn verify_integrity_success() {
+        let json = include_str!("../data/full_collaterall.json");
+        let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
+
+        let der = include_bytes!("../data/our_evidence.bin").to_vec();
+        let mut slice = der.as_slice();
+        let quote = SgxQuote::read(&mut slice).unwrap();
+
+        verify_integrity(&collateral, &quote).unwrap();
+    }
 }

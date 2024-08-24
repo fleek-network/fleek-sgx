@@ -232,7 +232,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_quote() {
+    fn parse_quote_success() {
         let our_evidence_bytes = std::fs::read("data/our_evidence.bin").unwrap();
         let mut our_evidence_bytes_slice: &[u8] = &our_evidence_bytes;
         let _quote = SgxQuote::read(&mut our_evidence_bytes_slice).unwrap();

@@ -63,10 +63,7 @@ impl TrustStore {
 
     /// Verify the leaf node in a certificate chain is rooted in
     /// the trust store and does not use any revoked signatures.
-    pub fn verify_chain_leaf(
-        &self,
-        chain: Vec<CertificateInner>,
-    ) -> anyhow::Result<TrustedIdentity> {
+    pub fn verify_chain_leaf(&self, chain: &[CertificateInner]) -> anyhow::Result<TrustedIdentity> {
         if chain.is_empty() {
             bail!("empty certificate chain")
         }

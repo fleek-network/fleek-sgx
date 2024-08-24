@@ -1,3 +1,5 @@
+// partially taken from libsignal
+
 use anyhow::{bail, Context};
 use chrono::Utc;
 use p256::ecdsa::signature::Verifier;

@@ -186,14 +186,12 @@ fn parse_extensions<'a>(
     extensions: asn1::SequenceOf<'a, SgxExtension<'a>>,
     mut attributes: HashMap<ObjectIdentifier, &mut dyn OptionOfTryFromExtensionValue>,
 ) -> Result<()> {
-    println!("extensions:");
     for extension in extensions {
         let SgxExtension {
             sgx_extension_id,
             value,
         } = extension;
-        println!("{sgx_extension_id} - {value:?}");
-        println!();
+
         if let Some(attr) = attributes.get_mut(&sgx_extension_id) {
             attr.parse_and_save(value)
                 .with_context(|| sgx_extension_id.to_string())?;
@@ -292,7 +290,6 @@ impl<'a> TryFrom<SequenceOf<'a, SgxExtension<'a>>> for Tcb {
             compsvn16,
         ] = &mut compsvn;
 
-        println!("parse_extensions in Tcb");
         parse_extensions(
             value,
             HashMap::from([
@@ -386,7 +383,6 @@ impl<'a> TryFrom<SequenceOf<'a, SgxExtension<'a>>> for Configuration {
         let mut cached_keys = None;
         let mut smt_enabled = None;
 
-        println!("parse_extensions in Configuration");
         parse_extensions(
             value,
             HashMap::from([
