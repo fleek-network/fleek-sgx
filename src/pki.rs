@@ -55,7 +55,7 @@ impl TrustStore {
         let signer = self.find_issuer(crl.tbs_cert_list.issuer.to_string(), None)?;
         signer
             .pk
-            .verify(&crl)
+            .verify_strict(&crl)
             .map_err(|e| anyhow!("failed to verify crl signature: {e}"))?;
         self.push_trusted_crl(crl);
         Ok(())
@@ -84,7 +84,7 @@ impl TrustStore {
             // Validate issuer signature
             signer
                 .pk
-                .verify(cert)
+                .verify_strict(cert)
                 .map_err(|e| anyhow!("failed to verify certificate: {e}"))?;
 
             let pk = (cert)

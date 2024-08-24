@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn parse_quote_success() {
-        let our_evidence_bytes = std::fs::read("data/our_evidence.bin").unwrap();
+        let our_evidence_bytes = include_bytes!("../../data/quote.bin").to_vec();
         let mut our_evidence_bytes_slice: &[u8] = &our_evidence_bytes;
         let _quote = SgxQuote::read(&mut our_evidence_bytes_slice).unwrap();
     }

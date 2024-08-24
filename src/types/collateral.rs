@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn parse_collateral_success() {
-        let json = include_str!("../../data/full_collaterall.json");
+        let json = include_str!("../../data/full_collateral.json");
         let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
         println!("{}", serde_json::to_string_pretty(&collat).unwrap());
     }

@@ -1,9 +1,11 @@
 use anyhow::{anyhow, bail, Context};
+use hex::ToHex;
 use pki::TrustStore;
 use types::collateral::SgxCollateral;
 use types::quote::SgxQuote;
 use types::tcb_info::TcbInfo;
-use types::INTEL_ROOT_CA;
+use types::{INTEL_QE_VENDOR_ID, INTEL_ROOT_CA};
+use uuid::Uuid;
 
 mod pki;
 mod utils;
@@ -14,10 +16,15 @@ pub mod types;
 pub fn verify_remote_attestation(collateral: SgxCollateral, quote: SgxQuote) -> anyhow::Result<()> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked by the parent entity.
-    let (tcb_info,) = verify_integrity(&collateral, &quote)?;
+    let IntegrityOutput {
+        tcb_info,
+        _pck_signer,
+        _qe_id_issuer,
+        ..
+    } = verify_integrity(&collateral, &quote)?;
 
     // 2. Verify the Quoting Enclave is from a suitable source and is up to date.
-    verify_quote()?;
+    verify_quote(&quote)?;
 
     // 3. Verify the status of the Intel® SGX TCB described in the chain.
     verify_tcb_status(&tcb_info)?;
@@ -28,7 +35,21 @@ pub fn verify_remote_attestation(collateral: SgxCollateral, quote: SgxQuote) -> 
     Ok(())
 }
 
-fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<(TcbInfo,)> {
+/// Holder struct for the valid tcb info, as well as
+/// the various newly-trusted identities.
+struct IntegrityOutput {
+    tcb_info: TcbInfo,
+    _qe_id_issuer: pki::TrustedIdentity,
+    _pck_signer: pki::TrustedIdentity,
+}
+
+/// Verify the integrity of the certificate chain
+fn verify_integrity(
+    collateral: &SgxCollateral,
+    quote: &SgxQuote,
+) -> anyhow::Result<IntegrityOutput> {
+    // TODO(oz): validate expirations
+
     let root_ca = collateral
         .tcb_info_issuer_chain
         .last()
@@ -88,8 +109,8 @@ fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Res
         .as_tcb_info_and_verify(tcb_signer)
         .context("failed to verify tcb info signature")?;
 
-    // verify the quote's support pck signing certificate chain
-    trust_store
+    // verify the quote's pck signing certificate chain
+    let _pck_signer = trust_store
         .verify_chain_leaf(&quote.support.pck_cert_chain)
         .context("failed to verify quote support pck signing certificate chain")?;
 
@@ -98,10 +119,26 @@ fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Res
         .verify_chain_leaf(&collateral.qe_identity_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
-    Ok((tcb_info,))
+    Ok(IntegrityOutput {
+        tcb_info,
+        _pck_signer,
+        _qe_id_issuer,
+    })
 }
 
-fn verify_quote(/* ...*/) -> anyhow::Result<()> {
+/// Verify the quote
+fn verify_quote(quote: &SgxQuote) -> anyhow::Result<()> {
+    // verify the qe vendor is intel
+    Uuid::from_slice(&quote.quote_body.qe_vendor_id)
+        .ok()
+        .filter(|uuid| uuid == &INTEL_QE_VENDOR_ID)
+        .with_context(|| {
+            format!(
+                "QE Vendor ID: {} not Intel",
+                quote.quote_body.qe_vendor_id.encode_hex::<String>()
+            )
+        })?;
+
     todo!()
 }
 
@@ -127,10 +164,10 @@ mod tests {
 
     #[test]
     fn verify_integrity_success() {
-        let json = include_str!("../data/full_collaterall.json");
+        let json = include_str!("../data/full_collateral.json");
         let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
 
-        let der = include_bytes!("../data/our_evidence.bin").to_vec();
+        let der = include_bytes!("../data/quote.bin").to_vec();
         let mut slice = der.as_slice();
         let quote = SgxQuote::read(&mut slice).unwrap();
 
