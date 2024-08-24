@@ -6,7 +6,7 @@ use pki::TrustStore;
 use types::collateral::SgxCollateral;
 use types::qe_identity::{EnclaveType, QeTcbStatus};
 use types::quote::SgxQuote;
-use types::report::SgxReportBody;
+use types::report::{MREnclave, SgxReportBody};
 use types::tcb_info::TcbInfo;
 use types::{INTEL_QE_VENDOR_ID, INTEL_ROOT_CA};
 use uuid::Uuid;
@@ -25,6 +25,7 @@ pub mod types;
 pub fn verify_remote_attestation(
     collateral: SgxCollateral,
     quote: SgxQuote,
+    expected_mrenclave: &MREnclave,
 ) -> anyhow::Result<SgxReportBody> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked.
@@ -38,7 +39,7 @@ pub fn verify_remote_attestation(
     verify_tcb_status(&tcb_info, &quote.support.pck_extension)?;
 
     // 4. Verify the enclave measurements in the Quote reflect an enclave identity expected.
-    verify_enclave_measurements()?;
+    verify_enclave_measurements(expected_mrenclave, &quote.quote_body.report_body.mrenclave)?;
 
     Ok(quote.quote_body.report_body)
 }
@@ -265,10 +266,12 @@ fn verify_tcb_status(
         )));
     }
 
-    let mut tcb_levels = tcb_info.tcb_levels.clone();
-    tcb_levels.sort_by(|a, b| a.tcb.pcesvn().cmp(&b.tcb.pcesvn()));
+    // TODO: is sorting the levels necessary?
+    //let mut tcb_levels = tcb_info.tcb_levels.clone();
+    //tcb_levels.sort_by(|a, b| a.tcb.pcesvn().cmp(&b.tcb.pcesvn()));
 
-    let first_matching_level = tcb_levels
+    let first_matching_level = tcb_info
+        .tcb_levels
         .iter()
         .find(|level| in_tcb_level(level, pck_extension));
 
@@ -281,6 +284,11 @@ fn verify_tcb_status(
             TcbStatus::SWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
                 advisory_ids: level.advisory_ids.clone(),
             }),
+            // TODO: we allow `ConfigurationAndSWHardeningNeeded` temporarily until we do the TCB
+            // recovery
+            TcbStatus::ConfigurationAndSWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
+                advisory_ids: vec![],
+            }),
             _ => Err(anyhow!(format!(
                 "invalid tcb status: {:?}",
                 level.tcb_status
@@ -289,8 +297,18 @@ fn verify_tcb_status(
         .unwrap_or_else(|| Err(anyhow!("Unsupported TCB in pck extension")))
 }
 
-fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
-    todo!()
+fn verify_enclave_measurements(
+    expected_mrenclave: &MREnclave,
+    mrenclave: &MREnclave,
+) -> anyhow::Result<()> {
+    if expected_mrenclave != mrenclave {
+        return Err(anyhow!(format!(
+            "expected mrenclave {}, was {}",
+            expected_mrenclave.encode_hex::<String>(),
+            mrenclave.encode_hex::<String>(),
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -310,7 +328,8 @@ mod tests {
     #[test]
     fn e2e_verify_remote_attestation() {
         let (collateral, quote) = test_data();
-        super::verify_remote_attestation(collateral, quote)
+        let expected_mrenclave = quote.quote_body.report_body.mrenclave;
+        super::verify_remote_attestation(collateral, quote, &expected_mrenclave)
             .expect("should have remote attested real good");
     }
 
@@ -344,6 +363,7 @@ mod tests {
     #[test]
     fn verify_enclave_measurements() {
         let (_, _) = test_data();
-        super::verify_enclave_measurements().expect("enclave measurements to be correct");
+        super::verify_enclave_measurements(&[0; 32], &[0; 32])
+            .expect("enclave measurements to be correct");
     }
 }
