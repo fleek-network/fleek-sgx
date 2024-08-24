@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Context};
 use hex::ToHex;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::VerifyingKey;
+use p256::{AffinePoint, EncodedPoint};
 use pki::TrustStore;
 use types::collateral::SgxCollateral;
 use types::qe_identity::{EnclaveType, QeTcbStatus};
@@ -214,9 +215,10 @@ fn verify_quote_signatures(quote: &SgxQuote) -> anyhow::Result<()> {
 
     quote.support.verify_qe_report()?;
 
-    // TODO(oz): fix this, getting an error from verifying key parsing
-    let attest_key = quote.support.attest_pub_key;
-    let attest_key = VerifyingKey::from_sec1_bytes(&attest_key)
+    let mut key = [0u8; 65];
+    key[0] = 4;
+    key[1..].copy_from_slice(&quote.support.attest_pub_key);
+    let attest_key = VerifyingKey::from_sec1_bytes(&key)
         .map_err(|e| anyhow!("failed to parse attest key: {e}"))?;
 
     let data = quote.quote_body.as_bytes();
