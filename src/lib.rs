@@ -24,7 +24,7 @@ pub fn verify_remote_attestation(
     quote: SgxQuote,
 ) -> anyhow::Result<SgxReportBody> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
-    //    certificate, and that no keys in the chain have been revoked by the parent entity.
+    //    certificate, and that no keys in the chain have been revoked.
     let tcb_info = verify_integrity(&collateral, &quote)?;
 
     // 2. Verify the Quoting Enclave source and all signatures in the quote.
@@ -34,10 +34,7 @@ pub fn verify_remote_attestation(
     // 3. Verify the status of the Intel® SGX TCB described in the chain.
     verify_tcb_status(&tcb_info)?;
 
-    // 4. Verify the custom data matches the value in the ISV enclave report
-    // verify_custom_data()?;
-
-    // 5. Verify the enclave measurements in the Quote reflect an enclave identity expected.
+    // 4. Verify the enclave measurements in the Quote reflect an enclave identity expected.
     verify_enclave_measurements()?;
 
     Ok(quote.quote_body.report_body)
@@ -52,12 +49,12 @@ fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Res
         .last()
         .context("Tcb issuer chain is empty")?;
 
-    // We need to verify the root certificate is self issued
+    // Verify the root certificate is self issued
     if root_ca.tbs_certificate.issuer != root_ca.tbs_certificate.subject {
         bail!("Root cert authority is not self signed");
     }
 
-    // We need to verify that the Trusted Root intel key has signed the certificate
+    // Verify that the Trusted Root intel key has signed the certificate
     INTEL_ROOT_CA
         .verify(root_ca)
         .map_err(|e| anyhow!("failed to verify root ca certificate: {e}"))?;
@@ -70,19 +67,19 @@ fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Res
         .push_unverified_crl(collateral.root_ca_crl.clone())
         .context("failed to verify root ca crl")?;
 
-    // verify the pck crl chain and add it to the store
+    // Verify the pck crl chain and add it to the store
     let pck_issuer = trust_store
         .verify_chain_leaf(&collateral.pck_crl_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
-    // verify the pck crl and add it to the store
+    // Verify the pck crl and add it to the store
     pck_issuer
         .pk
         .verify(&collateral.pck_crl)
         .map_err(|e| anyhow!("failed to verify pck crl: {e}"))?;
     trust_store.push_trusted_crl(collateral.pck_crl.clone());
 
-    // verify the tcb info issuer chain
+    // Verify the tcb info issuer chain
     let tcb_issuer = trust_store
         .verify_chain_leaf(&collateral.tcb_info_issuer_chain)
         .context("failed to verify tcb issuer chain")?;
@@ -100,18 +97,18 @@ fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Res
     let tcb_signer = p256::ecdsa::VerifyingKey::from_sec1_bytes(tcb_signer)
         .context("invalid tcb signer public key")?;
 
-    // verify the tcb info, and get the real struct
+    // Verify the tcb info, and get the real struct
     let tcb_info = collateral
         .tcb_info
         .as_tcb_info_and_verify(tcb_signer)
         .context("failed to verify tcb info signature")?;
 
-    // verify the quote's pck signing certificate chain
+    // Verify the quote's pck signing certificate chain
     let _pck_signer = trust_store
         .verify_chain_leaf(&quote.support.pck_cert_chain)
         .context("failed to verify quote support pck signing certificate chain")?;
 
-    // verify the quote identity issuer chain
+    // Verify the quote identity issuer chain
     let _qe_id_issuer = trust_store
         .verify_chain_leaf(&collateral.qe_identity_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
@@ -147,7 +144,7 @@ fn verify_quote_source(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::
         )
         .context("failed to verify enclave identity")?;
 
-    // compare mrsigner values
+    // Compare mrsigner values
     if qe_identity.mrsigner != quote.support.qe_report_body.mrsigner {
         bail!(
             "invalid qe mrsigner, expected {} but got {}",
@@ -156,14 +153,14 @@ fn verify_quote_source(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::
         )
     }
 
-    // compare isvprodid values
+    // Compare isvprodid values
     let report_isvprodid = quote.support.qe_report_body.isvprodid.get();
     let col_isvprodid = qe_identity.isvprodid;
     if report_isvprodid != col_isvprodid {
         bail!("invalid qe isvprodid, expected {report_isvprodid} but got {col_isvprodid}")
     }
 
-    // compare attributes from QE identity and masked attributes from quote’s QE report
+    // Compare attributes from QE identity and masked attributes from quote’s QE report
     let qe_report_attributes = quote.support.qe_report_body.sgx_attributes;
 
     let calculated_mask = qe_identity
@@ -217,7 +214,7 @@ fn verify_quote_signatures(quote: &SgxQuote) -> anyhow::Result<()> {
 
     quote.support.verify_qe_report()?;
 
-    // TODO(oz): fix this, getting and error from verifying key parsing
+    // TODO(oz): fix this, getting an error from verifying key parsing
     let attest_key = quote.support.attest_pub_key;
     let attest_key = VerifyingKey::from_sec1_bytes(&attest_key)
         .map_err(|e| anyhow!("failed to parse attest key: {e}"))?;
@@ -240,7 +237,7 @@ fn verify_tcb_status(_tcb_info: &TcbInfo) -> anyhow::Result<()> {
     //      - TcbStatus::UpToDate
     //      - TcbStatus::ConfigurationNeeded
 
-    Ok(())
+    todo!()
 }
 
 fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
@@ -249,7 +246,7 @@ fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SgxCollateral, SgxQuote};
 
     fn test_data() -> (SgxCollateral, SgxQuote<'static>) {
         let json = include_str!("../data/full_collateral.json");
@@ -262,27 +259,41 @@ mod tests {
     }
 
     #[test]
-    fn verify_remote_attestation_success() {
+    fn e2e_verify_remote_attestation() {
         let (collateral, quote) = test_data();
-        verify_remote_attestation(collateral, quote)
+        super::verify_remote_attestation(collateral, quote)
             .expect("should have remote attested real good");
     }
 
     #[test]
-    fn verify_integrity_success() {
+    fn verify_integrity() {
         let (collateral, quote) = test_data();
-        verify_integrity(&collateral, &quote).expect("certificate chain integrity should succeed");
+        super::verify_integrity(&collateral, &quote)
+            .expect("certificate chain integrity should succeed");
     }
 
     #[test]
-    fn verify_quote_source_success() {
+    fn verify_quote_source() {
         let (collateral, quote) = test_data();
-        verify_quote_source(&collateral, &quote).expect("quote source to be valid");
+        super::verify_quote_source(&collateral, &quote).expect("quote source to be valid");
     }
 
     #[test]
-    fn verify_quote_signatures_success() {
+    fn verify_quote_signatures() {
         let (_, quote) = test_data();
-        verify_quote_signatures(&quote).expect("quote source to be valid");
+        super::verify_quote_signatures(&quote).expect("tcb status to be valid");
+    }
+
+    #[test]
+    fn verify_tcb_status() {
+        let (collateral, quote) = test_data();
+        let tcb_info = super::verify_integrity(&collateral, &quote).unwrap();
+        super::verify_tcb_status(&tcb_info).expect("tcb status to be valid");
+    }
+
+    #[test]
+    fn verify_enclave_measurements() {
+        let (_, _) = test_data();
+        super::verify_enclave_measurements().expect("enclave measurements to be correct");
     }
 }

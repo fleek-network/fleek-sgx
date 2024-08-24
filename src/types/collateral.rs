@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use x509_cert::crl::CertificateList;
 use x509_cert::Certificate;
 
@@ -8,7 +8,11 @@ use crate::utils::{cert_chain, crl, de_from_str};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SgxCollateral {
-    /// version = 1.
+    /// Version = 1.
+    /// Not necessarily a representative of this type, but of all inner values.
+    /// For example, a RA-TLS implementation might assemble this struct manually
+    /// from certificate extensions.
+    #[serde(deserialize_with = "de_require_version_1")]
     pub version: u32,
 
     /* Certficate revokation lists */
@@ -34,9 +38,18 @@ pub struct SgxCollateral {
     /// TCB Info structure
     #[serde(deserialize_with = "de_from_str")]
     pub tcb_info: TcbInfoAndSignature,
-    #[serde(deserialize_with = "de_from_str")]
     /// QE Identity Structure
+    #[serde(deserialize_with = "de_from_str")]
     pub qe_identity: QuotingEnclaveIdentityAndSignature,
+}
+
+/// Deserialize a version tag, requiring the version to be 1
+pub fn de_require_version_1<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    let version = u32::deserialize(deserializer)?;
+    if version != 1 {
+        return Err(de::Error::custom("version must be 1"));
+    }
+    Ok(version)
 }
 
 #[cfg(test)]
