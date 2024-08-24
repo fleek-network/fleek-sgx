@@ -1,8 +1,6 @@
 use anyhow::{anyhow, bail, Context};
 use pki::TrustStore;
 use types::{Quote, SgxCollateral, INTEL_ROOT_CA};
-use x509_cert::crl::CertificateList;
-use x509_cert::der::Decode;
 
 mod pki;
 pub mod quote;
@@ -47,12 +45,9 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
     // Now that we have verified the root ca, we can build the initial trust store.
     let mut trust_store = TrustStore::new(vec![root_ca.clone()])?;
 
-    // Parse and verify that the CRL is signed by Intel
-    let pem = pem::parse(collateral.root_ca_crl.as_bytes()).context("invalid root ca crl pem")?;
-    let root_ca_crl =
-        CertificateList::from_der(pem.contents()).context("invalid root ca crl der")?;
+    // Verify that the CRL is signed by Intel and add it to the store
     trust_store
-        .push_unverified_crl(root_ca_crl)
+        .push_unverified_crl(collateral.root_ca_crl)
         .context("failed to verify root ca crl")?;
 
     // verify the pck crl chain and add it to the store
@@ -60,20 +55,19 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
         .verify_chain_leaf(collateral.pck_crl_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
-    // parse and verify the pck crl and add it to the store
-    let pem = pem::parse(collateral.pck_crl.as_bytes()).context("invalid pck crl pem")?;
-    let pck_crl = CertificateList::from_der(pem.contents()).context("invalid pck crl der")?;
+    // verify the pck crl and add it to the store
     pck_issuer
         .pk
-        .verify(&pck_crl)
+        .verify(&collateral.pck_crl)
         .map_err(|e| anyhow!("failed to verify pck crl: {e}"))?;
-    trust_store.push_trusted_crl(pck_crl);
+    trust_store.push_trusted_crl(collateral.pck_crl);
 
+    // verify the tcb info issuer chain
     let tcb_issuer = trust_store
         .verify_chain_leaf(collateral.tcb_info_issuer_chain)
         .context("failed to verify tcb issuer chain")?;
 
-    // TODO: validate oids (ec-with-sha256, prime256v1)
+    // TODO: validate signature algorithm oids (ec-with-sha256, prime256v1)
 
     // get the tcb signer public key
     let tcb_signer = tcb_issuer
@@ -93,6 +87,7 @@ fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<
         .context("failed to verify tcb info signature")?;
 
     // verify the quote's support pck signing certificate chain
+    // TODO: get from quote, not collateral
     trust_store
         .verify_chain_leaf(collateral.pck_signing_chain)
         .context("failed to verify quote support pck signing certificate chain")?;
