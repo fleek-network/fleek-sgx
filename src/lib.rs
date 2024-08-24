@@ -5,7 +5,11 @@ use x509_cert::crl::CertificateList;
 use x509_cert::der::Decode;
 
 mod pki;
+pub mod quote;
+pub mod report;
+mod sgx_x509;
 pub mod types;
+mod utils;
 
 pub fn verify_remote_attestation(collateral: SgxCollateral, quote: Quote) -> anyhow::Result<()> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
