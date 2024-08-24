@@ -25,12 +25,7 @@ pub fn verify_remote_attestation(
 ) -> anyhow::Result<SgxReportBody> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked by the parent entity.
-    let IntegrityOutput {
-        tcb_info,
-        _pck_signer,
-        _qe_id_issuer,
-        ..
-    } = verify_integrity(&collateral, &quote)?;
+    let tcb_info = verify_integrity(&collateral, &quote)?;
 
     // 2. Verify the Quoting Enclave source and all signatures in the quote.
     verify_quote_source(&collateral, &quote)?;
@@ -48,19 +43,8 @@ pub fn verify_remote_attestation(
     Ok(quote.quote_body.report_body)
 }
 
-/// Holder struct for the valid tcb info, as well as
-/// the various newly-trusted identities.
-struct IntegrityOutput {
-    tcb_info: TcbInfo,
-    _qe_id_issuer: pki::TrustedIdentity,
-    _pck_signer: pki::TrustedIdentity,
-}
-
 /// Verify the integrity of the certificate chain
-fn verify_integrity(
-    collateral: &SgxCollateral,
-    quote: &SgxQuote,
-) -> anyhow::Result<IntegrityOutput> {
+fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<TcbInfo> {
     // TODO(oz): validate expirations
 
     let root_ca = collateral
@@ -132,11 +116,7 @@ fn verify_integrity(
         .verify_chain_leaf(&collateral.qe_identity_issuer_chain)
         .context("failed to verify pck crl issuer certificate chain")?;
 
-    Ok(IntegrityOutput {
-        tcb_info,
-        _pck_signer,
-        _qe_id_issuer,
-    })
+    Ok(tcb_info)
 }
 
 /// Verify the quote enclave source
@@ -237,6 +217,7 @@ fn verify_quote_signatures(quote: &SgxQuote) -> anyhow::Result<()> {
 
     quote.support.verify_qe_report()?;
 
+    // TODO(oz): fix this, getting and error from verifying key parsing
     let attest_key = quote.support.attest_pub_key;
     let attest_key = VerifyingKey::from_sec1_bytes(&attest_key)
         .map_err(|e| anyhow!("failed to parse attest key: {e}"))?;
@@ -270,15 +251,38 @@ fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn verify_integrity_success() {
+    fn test_data() -> (SgxCollateral, SgxQuote<'static>) {
         let json = include_str!("../data/full_collateral.json");
         let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
 
-        let der = include_bytes!("../data/quote.bin").to_vec();
-        let mut slice = der.as_slice();
-        let quote = SgxQuote::read(&mut slice).unwrap();
+        let der = include_bytes!("../data/quote.bin");
+        let quote = SgxQuote::read(&mut der.as_slice()).unwrap();
 
-        verify_integrity(&collateral, &quote).unwrap();
+        (collateral, quote)
+    }
+
+    #[test]
+    fn verify_remote_attestation_success() {
+        let (collateral, quote) = test_data();
+        verify_remote_attestation(collateral, quote)
+            .expect("should have remote attested real good");
+    }
+
+    #[test]
+    fn verify_integrity_success() {
+        let (collateral, quote) = test_data();
+        verify_integrity(&collateral, &quote).expect("certificate chain integrity should succeed");
+    }
+
+    #[test]
+    fn verify_quote_source_success() {
+        let (collateral, quote) = test_data();
+        verify_quote_source(&collateral, &quote).expect("quote source to be valid");
+    }
+
+    #[test]
+    fn verify_quote_signatures_success() {
+        let (_, quote) = test_data();
+        verify_quote_signatures(&quote).expect("quote source to be valid");
     }
 }
