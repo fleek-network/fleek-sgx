@@ -5,8 +5,8 @@ use p256::ecdsa::Signature;
 use x509_cert::certificate::CertificateInner;
 use zerocopy::{little_endian, AsBytes, FromBytes, FromZeroes};
 
-use crate::report::SgxReportBody;
-use crate::sgx_x509::SgxPckExtension;
+use super::report::SgxReportBody;
+use super::sgx_x509::SgxPckExtension;
 use crate::utils;
 
 /// The version of the SGX Quote (A.4.3)

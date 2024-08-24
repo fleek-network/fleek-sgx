@@ -1,15 +1,15 @@
 use anyhow::{anyhow, bail, Context};
 use pki::TrustStore;
-use types::{Quote, SgxCollateral, INTEL_ROOT_CA};
+use types::collateral::SgxCollateral;
+use types::quote::SgxQuote;
+use types::INTEL_ROOT_CA;
 
 mod pki;
-pub mod quote;
-pub mod report;
-mod sgx_x509;
+
 pub mod types;
 mod utils;
 
-pub fn verify_remote_attestation(collateral: SgxCollateral, quote: Quote) -> anyhow::Result<()> {
+pub fn verify_remote_attestation(collateral: SgxCollateral, quote: SgxQuote) -> anyhow::Result<()> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked.
     verify_integrity(collateral, quote)?;
@@ -26,7 +26,7 @@ pub fn verify_remote_attestation(collateral: SgxCollateral, quote: Quote) -> any
     Ok(())
 }
 
-fn verify_integrity(collateral: SgxCollateral, _quote: Quote) -> anyhow::Result<()> {
+fn verify_integrity(collateral: SgxCollateral, _quote: SgxQuote) -> anyhow::Result<()> {
     let root_ca = collateral
         .tcb_info_issuer_chain
         .last()
@@ -117,6 +117,9 @@ fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
 fn test_verify_integrity() {
     let json = include_str!("../data/full_collaterall.json");
     let collateral: SgxCollateral = serde_json::from_str(json).unwrap();
+    let der = include_bytes!("../data/our_evidence.bin").to_vec();
+    let mut slice = der.as_slice();
+    let quote = SgxQuote::read(&mut slice).unwrap();
 
-    verify_integrity(collateral, Quote {}).unwrap();
+    verify_integrity(collateral, quote).unwrap();
 }
