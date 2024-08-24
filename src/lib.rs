@@ -2,7 +2,6 @@ use anyhow::{anyhow, bail, Context};
 use hex::ToHex;
 use p256::ecdsa::signature::Verifier;
 use p256::ecdsa::VerifyingKey;
-use p256::{AffinePoint, EncodedPoint};
 use pki::TrustStore;
 use types::collateral::SgxCollateral;
 use types::qe_identity::{EnclaveType, QeTcbStatus};
@@ -12,6 +11,9 @@ use types::tcb_info::TcbInfo;
 use types::{INTEL_QE_VENDOR_ID, INTEL_ROOT_CA};
 use uuid::Uuid;
 use zerocopy::AsBytes;
+
+use crate::types::sgx_x509::SgxPckExtension;
+use crate::types::tcb_info::{TcbLevel, TcbStanding, TcbStatus};
 
 mod pki;
 mod utils;
@@ -33,7 +35,7 @@ pub fn verify_remote_attestation(
     verify_quote_signatures(&quote)?;
 
     // 3. Verify the status of the Intel® SGX TCB described in the chain.
-    verify_tcb_status(&tcb_info)?;
+    verify_tcb_status(&tcb_info, &quote.support.pck_extension)?;
 
     // 4. Verify the enclave measurements in the Quote reflect an enclave identity expected.
     verify_enclave_measurements()?;
@@ -232,14 +234,59 @@ fn verify_quote_signatures(quote: &SgxQuote) -> anyhow::Result<()> {
 
 /// Ensure the latest tcb info is not revoked, and is either up to date or only needs a
 /// configuration change.
-fn verify_tcb_status(_tcb_info: &TcbInfo) -> anyhow::Result<()> {
-    // TODO:
-    //   - sort tcb info by pcesvn/compsvn
-    //   - ensure status of the latest is either:
-    //      - TcbStatus::UpToDate
-    //      - TcbStatus::ConfigurationNeeded
+fn verify_tcb_status(
+    tcb_info: &TcbInfo,
+    pck_extension: &SgxPckExtension,
+) -> anyhow::Result<TcbStanding> {
+    /// Returns true if all the pck components are >= all the tcb level components AND
+    /// the pck pcesvn is >= tcb pcesvn
+    fn in_tcb_level(level: &TcbLevel, pck_extension: &SgxPckExtension) -> bool {
+        const SVN_LENGTH: usize = 16;
+        let pck_components: &[u8; SVN_LENGTH] = &pck_extension.tcb.compsvn;
 
-    todo!()
+        pck_components
+            .iter()
+            .zip(level.tcb.components())
+            .all(|(&p, l)| p >= l)
+            && pck_extension.tcb.pcesvn >= level.tcb.pcesvn()
+    }
+
+    // make sure the tcb_info matches the enclave's model/PCE version
+    if pck_extension.fmspc != tcb_info.fmspc {
+        return Err(anyhow!(format!(
+            "tcb fmspc mismatch (pck extension fmspc was {:?}, tcb_info fmspc was {:?})",
+            &pck_extension.fmspc, &tcb_info.fmspc
+        )));
+    }
+    if pck_extension.pceid != tcb_info.pce_id {
+        return Err(anyhow!(format!(
+            "tcb pceid mismatch (pck extension pceid was {:?}, tcb_info pceid was {:?})",
+            &pck_extension.pceid, &tcb_info.pce_id
+        )));
+    }
+
+    let mut tcb_levels = tcb_info.tcb_levels.clone();
+    tcb_levels.sort_by(|a, b| a.tcb.pcesvn().cmp(&b.tcb.pcesvn()));
+
+    let first_matching_level = tcb_levels
+        .iter()
+        .find(|level| in_tcb_level(level, pck_extension));
+
+    // Find the tcb status corresponding to our enclave in the tcb info
+    // the consumer of dcap needs to decide which statuses are acceptable (either by
+    // returning this up, or configuring acceptable statuses)
+    first_matching_level
+        .map(|level| match level.tcb_status {
+            TcbStatus::UpToDate => Ok(TcbStanding::UpToDate),
+            TcbStatus::SWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
+                advisory_ids: level.advisory_ids.clone(),
+            }),
+            _ => Err(anyhow!(format!(
+                "invalid tcb status: {:?}",
+                level.tcb_status
+            ))),
+        })
+        .unwrap_or_else(|| Err(anyhow!("Unsupported TCB in pck extension")))
 }
 
 fn verify_enclave_measurements(/* ...*/) -> anyhow::Result<()> {
@@ -290,7 +337,8 @@ mod tests {
     fn verify_tcb_status() {
         let (collateral, quote) = test_data();
         let tcb_info = super::verify_integrity(&collateral, &quote).unwrap();
-        super::verify_tcb_status(&tcb_info).expect("tcb status to be valid");
+        super::verify_tcb_status(&tcb_info, &quote.support.pck_extension)
+            .expect("tcb status to be valid");
     }
 
     #[test]
