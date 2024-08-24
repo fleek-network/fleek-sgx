@@ -1,19 +1,28 @@
 use anyhow::{anyhow, bail, Context};
 use hex::ToHex;
+use p256::ecdsa::signature::Verifier;
+use p256::ecdsa::VerifyingKey;
 use pki::TrustStore;
 use types::collateral::SgxCollateral;
+use types::qe_identity::{EnclaveType, QeTcbStatus};
 use types::quote::SgxQuote;
+use types::report::SgxReportBody;
 use types::tcb_info::TcbInfo;
 use types::{INTEL_QE_VENDOR_ID, INTEL_ROOT_CA};
 use uuid::Uuid;
+use zerocopy::AsBytes;
 
 mod pki;
 mod utils;
 
 pub mod types;
 
-/// Verify a remote attestation from a given collateral and quote.
-pub fn verify_remote_attestation(collateral: SgxCollateral, quote: SgxQuote) -> anyhow::Result<()> {
+/// Verify a remote attestation from a given collateral and quote, returning
+/// the verified sgx report body (containing MRENCLAVE and report data bytes).
+pub fn verify_remote_attestation(
+    collateral: SgxCollateral,
+    quote: SgxQuote,
+) -> anyhow::Result<SgxReportBody> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked by the parent entity.
     let IntegrityOutput {
@@ -23,16 +32,20 @@ pub fn verify_remote_attestation(collateral: SgxCollateral, quote: SgxQuote) -> 
         ..
     } = verify_integrity(&collateral, &quote)?;
 
-    // 2. Verify the Quoting Enclave is from a suitable source and is up to date.
-    verify_quote(&quote)?;
+    // 2. Verify the Quoting Enclave source and all signatures in the quote.
+    verify_quote_source(&collateral, &quote)?;
+    verify_quote_signatures(&quote)?;
 
     // 3. Verify the status of the Intel® SGX TCB described in the chain.
     verify_tcb_status(&tcb_info)?;
 
-    // 4. Verify the enclave measurements in the Quote reflect an enclave identity expected.
+    // 4. Verify the custom data matches the value in the ISV enclave report
+    // verify_custom_data()?;
+
+    // 5. Verify the enclave measurements in the Quote reflect an enclave identity expected.
     verify_enclave_measurements()?;
 
-    Ok(())
+    Ok(quote.quote_body.report_body)
 }
 
 /// Holder struct for the valid tcb info, as well as
@@ -126,8 +139,8 @@ fn verify_integrity(
     })
 }
 
-/// Verify the quote
-fn verify_quote(quote: &SgxQuote) -> anyhow::Result<()> {
+/// Verify the quote enclave source
+fn verify_quote_source(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<()> {
     // verify the qe vendor is intel
     Uuid::from_slice(&quote.quote_body.qe_vendor_id)
         .ok()
@@ -139,7 +152,102 @@ fn verify_quote(quote: &SgxQuote) -> anyhow::Result<()> {
             )
         })?;
 
-    todo!()
+    let qe_identity = collateral
+        .qe_identity
+        .verify_as_enclave_identity(
+            &VerifyingKey::from_sec1_bytes(
+                collateral.qe_identity_issuer_chain[0]
+                    .tbs_certificate
+                    .subject_public_key_info
+                    .subject_public_key
+                    .as_bytes()
+                    .unwrap(),
+            )
+            .context("failed to parse qe identity issuer pk")?,
+        )
+        .context("failed to verify enclave identity")?;
+
+    // compare mrsigner values
+    if qe_identity.mrsigner != quote.support.qe_report_body.mrsigner {
+        bail!(
+            "invalid qe mrsigner, expected {} but got {}",
+            hex::encode(qe_identity.mrsigner),
+            hex::encode(quote.support.qe_report_body.mrsigner)
+        )
+    }
+
+    // compare isvprodid values
+    let report_isvprodid = quote.support.qe_report_body.isvprodid.get();
+    let col_isvprodid = qe_identity.isvprodid;
+    if report_isvprodid != col_isvprodid {
+        bail!("invalid qe isvprodid, expected {report_isvprodid} but got {col_isvprodid}")
+    }
+
+    // compare attributes from QE identity and masked attributes from quote’s QE report
+    let qe_report_attributes = quote.support.qe_report_body.sgx_attributes;
+
+    let calculated_mask = qe_identity
+        .attributes_mask
+        .iter()
+        .zip(qe_report_attributes.iter())
+        .map(|(a, b)| *a & *b);
+
+    if calculated_mask
+        .zip(qe_identity.attributes)
+        .any(|(masked_attr, identity_attr)| masked_attr != identity_attr)
+    {
+        bail!("qe attributes mismatch")
+    }
+
+    if qe_identity.id != EnclaveType::Qe {
+        bail!(
+            "Invalid enclave identity for quoting enclave : {:?}",
+            qe_identity.id
+        );
+    }
+
+    // Later, we will also lookup the tcb status in the TcbInfo but if
+    // the Enclave Identity tcb status isn't up to date, we can fail right
+    // away
+    let report_isvsvn = quote.support.qe_report_body.isvsvn.get();
+    let tcb_status = qe_identity.tcb_status(report_isvsvn);
+    if tcb_status != &QeTcbStatus::UpToDate {
+        bail!("Enclave version tcb not up to date (was {:?})", tcb_status);
+    }
+
+    Ok(())
+}
+
+fn verify_quote_signatures(quote: &SgxQuote) -> anyhow::Result<()> {
+    let pck_pk_bytes = quote.support.pck_cert_chain[0]
+        .tbs_certificate
+        .subject_public_key_info
+        .subject_public_key
+        .as_bytes()
+        .context("missing pck pk")?;
+    let pck_pkey = VerifyingKey::from_sec1_bytes(pck_pk_bytes)
+        .map_err(|e| anyhow!("failed to parse pck key: {e}"))?;
+
+    pck_pkey
+        .verify(
+            quote.support.qe_report_body.as_bytes(),
+            &quote.support.qe_report_signature,
+        )
+        .map_err(|e| anyhow!("failed to verify qe report signature: {e}"))?;
+
+    quote.support.verify_qe_report()?;
+
+    let attest_key = quote.support.attest_pub_key;
+    let attest_key = VerifyingKey::from_sec1_bytes(&attest_key)
+        .map_err(|e| anyhow!("failed to parse attest key: {e}"))?;
+
+    let data = quote.quote_body.as_bytes();
+    let sig = quote.support.isv_signature;
+    attest_key
+        .verify(data, &sig)
+        .context("failed to verify quote signature")?;
+
+    Ok(())
 }
 
 /// Ensure the latest tcb info is not revoked, and is either up to date or only needs a

@@ -1,23 +1,66 @@
+// Adapted from: https://github.com/signalapp/libsignal/
+
+use anyhow::{bail, Context};
 use chrono::Utc;
+use p256::ecdsa::signature::Verifier;
+use p256::ecdsa::{Signature, VerifyingKey};
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+
+use super::UInt32LE;
+use crate::utils::u32_hex;
 
 /// The version of EnclaveIdentity JSON structure
 const ENCLAVE_IDENTITY_V2: u16 = 2;
 
-pub(crate) type UInt16LE = zerocopy::little_endian::U16;
-pub(crate) type UInt32LE = zerocopy::little_endian::U32;
-pub(crate) type UInt64LE = zerocopy::little_endian::U64;
+#[derive(Debug, Deserialize, Serialize)]
+pub struct QuotingEnclaveIdentityAndSignature {
+    #[serde(rename = "enclaveIdentity")]
+    enclave_identity_raw: Box<RawValue>,
+    #[serde(with = "hex")]
+    signature: Vec<u8>,
+}
 
-#[derive(Deserialize, Debug)]
+impl TryFrom<String> for QuotingEnclaveIdentityAndSignature {
+    type Error = serde_json::Error;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        serde_json::from_str(&value)
+    }
+}
+
+impl QuotingEnclaveIdentityAndSignature {
+    pub fn verify_as_enclave_identity(
+        &self,
+        public_key: &VerifyingKey,
+    ) -> anyhow::Result<EnclaveIdentity> {
+        public_key
+            .verify(
+                self.enclave_identity_raw.to_string().as_bytes(),
+                &Signature::from_slice(&self.signature).context("failed to parse signature")?,
+            )
+            .context("failed to verify qe identity signature")?;
+
+        let identity: EnclaveIdentity = serde_json::from_str(self.enclave_identity_raw.get())
+            .context("failed to parse enclave identity")?;
+        if identity.version != ENCLAVE_IDENTITY_V2 {
+            bail!("unsupported enclave identity version {}", identity.version);
+        }
+
+        Ok(identity)
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct EnclaveIdentity {
+pub struct EnclaveIdentity {
     pub id: EnclaveType,
     version: u16,
     _issue_date: chrono::DateTime<Utc>,
     pub next_update: chrono::DateTime<Utc>,
     _tcb_evaluation_data_number: u16,
-    #[serde(deserialize_with = "deserialize_u32_hex")]
+    #[serde(with = "u32_hex")]
     pub miscselect: UInt32LE,
-    #[serde(deserialize_with = "deserialize_u32_hex")]
+    #[serde(with = "u32_hex")]
     pub miscselect_mask: UInt32LE,
     #[serde(with = "hex")]
     pub attributes: [u8; 16],
@@ -27,14 +70,6 @@ pub(crate) struct EnclaveIdentity {
     pub mrsigner: [u8; 32],
     pub isvprodid: u16,
     pub tcb_levels: Vec<QeTcbLevel>,
-}
-
-fn deserialize_u32_hex<'de, D>(deserializer: D) -> std::result::Result<UInt32LE, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value: [u8; 4] = hex::deserialize(deserializer)?;
-    Ok(value.into())
 }
 
 impl EnclaveIdentity {
@@ -63,18 +98,18 @@ impl EnclaveIdentity {
 //     }
 // }
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
-pub(crate) enum EnclaveType {
+pub enum EnclaveType {
     /// Quoting Enclave
     Qe,
     /// Quote Verification Enclave (which we won't use)
     Qve,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct QeTcbLevel {
+pub struct QeTcbLevel {
     // We don't bother deserializing the field "advisoryIds" since
     // we fetch the advisory ids from the matching TCB level
     tcb: QeTcb,
@@ -84,7 +119,7 @@ pub(crate) struct QeTcbLevel {
 
 #[cfg(test)]
 impl QeTcbLevel {
-    pub(crate) fn from_parts(tcb_status: QeTcbStatus, isvsvn: u16) -> Self {
+    pub fn from_parts(tcb_status: QeTcbStatus, isvsvn: u16) -> Self {
         Self {
             _tcb_date: Utc::now(),
             tcb_status,
@@ -93,7 +128,7 @@ impl QeTcbLevel {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 struct QeTcb {
     isvsvn: u16,
 }
@@ -104,8 +139,8 @@ struct QeTcb {
 /// the [`TcbLevel`]. If the `QeTcbStatus` is not `UpToDate`, the QE
 /// should generally be rejected, otherwise the corresponding
 /// `TcbLevel` should be found and consulted.
-#[derive(Debug, PartialEq, Eq, Deserialize)]
-pub(crate) enum QeTcbStatus {
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum QeTcbStatus {
     UpToDate,
     OutOfDate,
     Revoked,

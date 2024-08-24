@@ -319,6 +319,7 @@ dependencies = [
  "pem",
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
  "x509-cert",
  "x509-verify",

@@ -1,4 +1,4 @@
-// partially taken from libsignal
+// Adapted from: https://github.com/signalapp/libsignal/
 
 use anyhow::{bail, Context};
 use chrono::Utc;

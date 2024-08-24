@@ -6,6 +6,7 @@ use x509_verify::spki::SubjectPublicKeyInfo;
 use x509_verify::VerifyingKey;
 
 pub mod collateral;
+pub mod qe_identity;
 pub mod quote;
 pub mod report;
 pub mod sgx_x509;
@@ -29,3 +30,7 @@ pub static INTEL_ROOT_CA: LazyLock<VerifyingKey> = LazyLock::new(|| {
     let spki = SubjectPublicKeyInfo::<Any, _>::from_pem(INTEL_ROOT_CA_PEM).unwrap();
     x509_verify::VerifyingKey::try_from(spki).unwrap()
 });
+
+pub type UInt16LE = zerocopy::little_endian::U16;
+pub type UInt32LE = zerocopy::little_endian::U32;
+pub type UInt64LE = zerocopy::little_endian::U64;

@@ -1,6 +1,23 @@
 use std::fmt::Display;
 
 use serde::{de, Deserialize, Deserializer};
+pub mod u32_hex {
+    use serde::Serializer;
+    use zerocopy::AsBytes;
+
+    use crate::types::UInt32LE;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> std::result::Result<UInt32LE, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value: [u8; 4] = hex::deserialize(deserializer)?;
+        Ok(value.into())
+    }
+    pub fn serialize<S: Serializer>(value: &UInt32LE, serializer: S) -> Result<S::Ok, S::Error> {
+        hex::serialize(value.as_bytes(), serializer)
+    }
+}
 
 /// Deserialize and serialize certificate chains in place
 pub mod cert_chain {

@@ -2,10 +2,11 @@ use serde::{Deserialize, Serialize};
 use x509_cert::crl::CertificateList;
 use x509_cert::Certificate;
 
+use super::qe_identity::QuotingEnclaveIdentityAndSignature;
 use super::tcb_info::TcbInfoAndSignature;
 use crate::utils::{cert_chain, crl, de_from_str};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SgxCollateral {
     /// version = 1.
     pub version: u32,
@@ -33,8 +34,9 @@ pub struct SgxCollateral {
     /// TCB Info structure
     #[serde(deserialize_with = "de_from_str")]
     pub tcb_info: TcbInfoAndSignature,
+    #[serde(deserialize_with = "de_from_str")]
     /// QE Identity Structure
-    pub qe_identity: String,
+    pub qe_identity: QuotingEnclaveIdentityAndSignature,
 }
 
 #[cfg(test)]

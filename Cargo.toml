@@ -23,5 +23,6 @@ pem = "3.0.4"
 x509-cert = "0.2.5"
 x509-verify = {version = "0.4.6", features = ["x509"]}
 p256 = "0.13.2"
+sha2 = "0.10.8"
 
 # rustls = {version = "0.23.12", default-features = false, features= ["tls12", "logging", "std"]}
