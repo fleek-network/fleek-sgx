@@ -34,7 +34,7 @@ pub fn verify_remote_attestation(
     collateral: SgxCollateral,
     quote: SgxQuote,
     expected_mrenclave: &MREnclave,
-) -> anyhow::Result<SgxReportBody> {
+) -> anyhow::Result<(TcbStanding, SgxReportBody)> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked.
     let tcb_info = verify_integrity(current_time, &collateral, &quote)?;
@@ -43,12 +43,18 @@ pub fn verify_remote_attestation(
     verify_quote(&collateral, &quote)?;
 
     // 3. Verify the status of the Intel® SGX TCB described in the chain.
-    verify_tcb_status(&tcb_info, &quote.support.pck_extension)?;
+    let tcb_standing = verify_tcb_status(&tcb_info, &quote.support.pck_extension)?;
 
     // 4. Verify the enclave measurements in the Quote reflect an enclave identity expected.
-    verify_enclave_measurements(expected_mrenclave, &quote.quote_body.report_body.mrenclave)?;
+    if expected_mrenclave != &quote.quote_body.report_body.mrenclave {
+        bail!(
+            "invalid MRENCLAVE, expected {}, but got {}",
+            hex::encode(expected_mrenclave),
+            hex::encode(quote.quote_body.report_body.mrenclave)
+        );
+    }
 
-    Ok(quote.quote_body.report_body)
+    Ok((tcb_standing, quote.quote_body.report_body))
 }
 
 /// Verify the integrity of the certificate chain
@@ -283,49 +289,31 @@ fn verify_tcb_status(
         )));
     }
 
-    // TODO: is sorting the levels necessary?
+    // TODO: Sort tcb levels by pcesvn and compsvn(s)
     //let mut tcb_levels = tcb_info.tcb_levels.clone();
     //tcb_levels.sort_by(|a, b| a.tcb.pcesvn().cmp(&b.tcb.pcesvn()));
 
     let first_matching_level = tcb_info
         .tcb_levels
         .iter()
-        .find(|level| in_tcb_level(level, pck_extension));
+        .find(|level| in_tcb_level(level, pck_extension))
+        .context("Unsupported TCB in pck extension")?;
 
     // Find the tcb status corresponding to our enclave in the tcb info
     // the consumer of dcap needs to decide which statuses are acceptable (either by
     // returning this up, or configuring acceptable statuses)
-    first_matching_level
-        .map(|level| match level.tcb_status {
-            TcbStatus::UpToDate => Ok(TcbStanding::UpToDate),
-            TcbStatus::SWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
-                advisory_ids: level.advisory_ids.clone(),
-            }),
-            // TODO: we allow `ConfigurationAndSWHardeningNeeded` temporarily until we do the TCB
-            // recovery
-            TcbStatus::ConfigurationAndSWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
-                advisory_ids: vec![],
-            }),
-            _ => Err(anyhow!(format!(
-                "invalid tcb status: {:?}",
-                level.tcb_status
-            ))),
-        })
-        .unwrap_or_else(|| Err(anyhow!("Unsupported TCB in pck extension")))
-}
-
-fn verify_enclave_measurements(
-    expected_mrenclave: &MREnclave,
-    mrenclave: &MREnclave,
-) -> anyhow::Result<()> {
-    if expected_mrenclave != mrenclave {
-        return Err(anyhow!(format!(
-            "expected mrenclave {}, was {}",
-            expected_mrenclave.encode_hex::<String>(),
-            mrenclave.encode_hex::<String>(),
-        )));
+    match first_matching_level.tcb_status {
+        TcbStatus::UpToDate => Ok(TcbStanding::UpToDate),
+        TcbStatus::SWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
+            advisory_ids: first_matching_level.advisory_ids.clone(),
+        }),
+        // TODO: we allow `ConfigurationAndSWHardeningNeeded` temporarily until we do the TCB
+        // recovery
+        TcbStatus::ConfigurationAndSWHardeningNeeded => Ok(TcbStanding::SWHardeningNeeded {
+            advisory_ids: vec![],
+        }),
+        _ => bail!("invalid tcb status: {:?}", first_matching_level.tcb_status),
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -382,12 +370,5 @@ mod tests {
         let tcb_info = super::verify_integrity(SystemTime::now(), &collateral, &quote).unwrap();
         super::verify_tcb_status(&tcb_info, &quote.support.pck_extension)
             .expect("tcb status to be valid");
-    }
-
-    #[test]
-    fn verify_enclave_measurements() {
-        let (_, _) = test_data();
-        super::verify_enclave_measurements(&[0; 32], &[0; 32])
-            .expect("enclave measurements to be correct");
     }
 }
