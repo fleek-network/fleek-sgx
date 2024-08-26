@@ -1,3 +1,5 @@
+//! TODO: Add trusted time verification to all certificates we verify using the TrustStore
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{anyhow, bail};

@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use anyhow::{anyhow, bail, Context};
 use hex::ToHex;
 use p256::ecdsa::signature::Verifier;
@@ -22,18 +24,23 @@ pub mod types;
 
 /// Verify a remote attestation from a given collateral and quote, returning
 /// the verified sgx report body (containing MRENCLAVE and report data bytes).
+///
+/// # Security considerations
+///
+/// Consumers of this api *MUST* use a secure channel to aquire current_time.
+/// Specifically, on fortanix targets, [`SystemTime::now`](https://edp.fortanix.com/docs/api/std/time/struct.SystemTime.html#underlying-system-calls) is insecure.
 pub fn verify_remote_attestation(
+    current_time: SystemTime,
     collateral: SgxCollateral,
     quote: SgxQuote,
     expected_mrenclave: &MREnclave,
 ) -> anyhow::Result<SgxReportBody> {
     // 1. Verify the integrity of the signature chain from the Quote to the Intel-issued PCK
     //    certificate, and that no keys in the chain have been revoked.
-    let tcb_info = verify_integrity(&collateral, &quote)?;
+    let tcb_info = verify_integrity(current_time, &collateral, &quote)?;
 
     // 2. Verify the Quoting Enclave source and all signatures in the quote.
-    verify_quote_source(&collateral, &quote)?;
-    verify_quote_signatures(&quote)?;
+    verify_quote(&collateral, &quote)?;
 
     // 3. Verify the status of the Intel® SGX TCB described in the chain.
     verify_tcb_status(&tcb_info, &quote.support.pck_extension)?;
@@ -45,8 +52,12 @@ pub fn verify_remote_attestation(
 }
 
 /// Verify the integrity of the certificate chain
-fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<TcbInfo> {
-    // TODO(oz): validate expirations
+fn verify_integrity(
+    _current_time: SystemTime,
+    collateral: &SgxCollateral,
+    quote: &SgxQuote,
+) -> anyhow::Result<TcbInfo> {
+    // TODO(oz): verify root ca expirations
 
     let root_ca = collateral
         .tcb_info_issuer_chain
@@ -120,6 +131,12 @@ fn verify_integrity(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Res
     Ok(tcb_info)
 }
 
+fn verify_quote(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<()> {
+    verify_quote_source(collateral, quote)?;
+    verify_quote_signatures(quote)?;
+    Ok(())
+}
+
 /// Verify the quote enclave source
 fn verify_quote_source(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::Result<()> {
     // verify the qe vendor is intel
@@ -142,7 +159,7 @@ fn verify_quote_source(collateral: &SgxCollateral, quote: &SgxQuote) -> anyhow::
                     .subject_public_key_info
                     .subject_public_key
                     .as_bytes()
-                    .unwrap(),
+                    .context("missing subject public key")?,
             )
             .context("failed to parse qe identity issuer pk")?,
         )
@@ -313,6 +330,8 @@ fn verify_enclave_measurements(
 
 #[cfg(test)]
 mod tests {
+    use std::time::SystemTime;
+
     use super::{SgxCollateral, SgxQuote};
 
     fn test_data() -> (SgxCollateral, SgxQuote<'static>) {
@@ -329,14 +348,17 @@ mod tests {
     fn e2e_verify_remote_attestation() {
         let (collateral, quote) = test_data();
         let expected_mrenclave = quote.quote_body.report_body.mrenclave;
-        super::verify_remote_attestation(collateral, quote, &expected_mrenclave)
+
+        // Warning: SystemTime::now() is an insecure api on fortanix targets
+        super::verify_remote_attestation(SystemTime::now(), collateral, quote, &expected_mrenclave)
             .expect("should have remote attested real good");
     }
 
     #[test]
     fn verify_integrity() {
         let (collateral, quote) = test_data();
-        super::verify_integrity(&collateral, &quote)
+        // Warning: SystemTime::now() is an insecure api on fortanix targets
+        super::verify_integrity(SystemTime::now(), &collateral, &quote)
             .expect("certificate chain integrity should succeed");
     }
 
@@ -355,7 +377,9 @@ mod tests {
     #[test]
     fn verify_tcb_status() {
         let (collateral, quote) = test_data();
-        let tcb_info = super::verify_integrity(&collateral, &quote).unwrap();
+
+        // Warning: Systemtime::now()is an insecure api on fortanix targets
+        let tcb_info = super::verify_integrity(SystemTime::now(), &collateral, &quote).unwrap();
         super::verify_tcb_status(&tcb_info, &quote.support.pck_extension)
             .expect("tcb status to be valid");
     }
