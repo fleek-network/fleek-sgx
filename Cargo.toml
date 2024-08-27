@@ -2,6 +2,7 @@
 name = "fleek-remote-attestation"
 version = "0.1.0"
 edition = "2021"
+license = "GPLv3"
 
 [dependencies]
 anyhow = "1.0.86"
