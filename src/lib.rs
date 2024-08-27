@@ -11,6 +11,7 @@ use types::quote::SgxQuote;
 use types::report::{MREnclave, SgxReportBody};
 use types::tcb_info::TcbInfo;
 use types::{INTEL_QE_VENDOR_ID, INTEL_ROOT_CA};
+use utils::Expireable;
 use uuid::Uuid;
 use zerocopy::AsBytes;
 
@@ -60,11 +61,19 @@ pub fn verify_remote_attestation(
 
 /// Verify the integrity of the certificate chain
 fn verify_integrity(
-    _current_time: SystemTime,
+    current_time: SystemTime,
     collateral: &SgxCollateral,
     quote: &SgxQuote,
 ) -> anyhow::Result<TcbInfo> {
-    // TODO(oz): verify root ca expirations
+    if !collateral.tcb_info_issuer_chain.valid_at(current_time) {
+        bail!("Expired tcb info issuer chain")
+    }
+    if !collateral.pck_crl_issuer_chain.valid_at(current_time) {
+        bail!("Expired pck crl issuer chain")
+    }
+    if !quote.support.pck_cert_chain.valid_at(current_time) {
+        bail!("Expired quote support pck chain")
+    }
 
     let root_ca = collateral
         .tcb_info_issuer_chain
@@ -82,7 +91,7 @@ fn verify_integrity(
         .map_err(|e| anyhow!("failed to verify root ca certificate: {e}"))?;
 
     // Now that we have verified the root ca, we can build the initial trust store.
-    let mut trust_store = TrustStore::new(vec![root_ca.clone()])?;
+    let mut trust_store = TrustStore::new(current_time, vec![root_ca.clone()])?;
 
     // Verify that the CRL is signed by Intel and add it to the store
     trust_store
@@ -99,6 +108,9 @@ fn verify_integrity(
         .pk
         .verify(&collateral.pck_crl)
         .map_err(|e| anyhow!("failed to verify pck crl: {e}"))?;
+    if !collateral.pck_crl.valid_at(current_time) {
+        bail!("Expired or future PCK CRL")
+    }
     trust_store.push_trusted_crl(collateral.pck_crl.clone());
 
     // Verify the tcb info issuer chain

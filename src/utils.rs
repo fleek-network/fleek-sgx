@@ -1,6 +1,8 @@
-use std::fmt::Display;
+use std::time::SystemTime;
 
-use serde::{de, Deserialize, Deserializer};
+use x509_cert::certificate::CertificateInner;
+use x509_cert::crl::CertificateList;
+
 pub mod u32_hex {
     use serde::Serializer;
     use zerocopy::AsBytes;
@@ -49,28 +51,6 @@ pub mod cert_chain {
     }
 }
 
-// /// Deserialize and serialize a certificate in place
-// pub mod cert {
-//     use serde::{de, ser, Deserialize, Deserializer, Serializer};
-//     use x509_cert::der::{DecodePem, EncodePem};
-//     use x509_cert::Certificate;
-
-//     pub fn deserialize<'de, D>(deserializer: D) -> Result<Certificate, D::Error>
-//     where
-//         D: Deserializer<'de>,
-//     {
-//         let s = <String>::deserialize(deserializer)?;
-//         Certificate::from_pem(s.as_bytes()).map_err(de::Error::custom)
-//     }
-//     pub fn serialize<S: Serializer>(value: &Certificate, serializer: S) -> Result<S::Ok,
-// S::Error> {         serializer.serialize_str(
-//             &value
-//                 .to_pem(p256::pkcs8::LineEnding::LF)
-//                 .map_err(ser::Error::custom)?,
-//         )
-//     }
-// }
-
 /// Deserialize and serialize a cert revocation list in place
 pub mod crl {
     use std::str::FromStr;
@@ -116,6 +96,51 @@ pub mod wrap_json {
     {
         let string = serde_json::to_string(value).map_err(ser::Error::custom)?;
         serializer.serialize_str(&string)
+    }
+}
+
+pub trait Expireable {
+    fn valid_at(&self, timestamp: SystemTime) -> bool;
+}
+
+impl Expireable for CertificateList {
+    /// Validate CRL creation/expiration
+    fn valid_at(&self, timestamp: SystemTime) -> bool {
+        if let Some(na) = self.tbs_cert_list.next_update.map(|t| t.to_system_time()) {
+            if na <= timestamp {
+                return false;
+            }
+        }
+
+        // return false if the crl is for the future
+        // TODO(oz): should this actually be the case?
+        let nb = self.tbs_cert_list.this_update.to_system_time();
+        if nb >= timestamp {
+            return false;
+        }
+
+        true
+    }
+}
+
+impl Expireable for CertificateInner {
+    /// Validate a single certificate not_before/not_after
+    fn valid_at(&self, timestamp: SystemTime) -> bool {
+        let nb = self.tbs_certificate.validity.not_before.to_system_time();
+        let na = self.tbs_certificate.validity.not_after.to_system_time();
+        !(timestamp <= nb || na <= timestamp)
+    }
+}
+
+impl Expireable for &[CertificateInner] {
+    fn valid_at(&self, timestamp: SystemTime) -> bool {
+        self.iter().all(|cert| cert.valid_at(timestamp))
+    }
+}
+
+impl Expireable for Vec<CertificateInner> {
+    fn valid_at(&self, timestamp: SystemTime) -> bool {
+        self.as_slice().valid_at(timestamp)
     }
 }
 

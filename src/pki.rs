@@ -1,11 +1,14 @@
 //! TODO: Add trusted time verification to all certificates we verify using the TrustStore
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::SystemTime;
 
 use anyhow::{anyhow, bail};
 use x509_cert::certificate::CertificateInner;
 use x509_cert::crl::CertificateList;
 use x509_verify::VerifyingKey;
+
+use crate::utils::Expireable;
 
 /// Trust store for verifying certificate chains
 pub struct TrustStore {
@@ -13,6 +16,7 @@ pub struct TrustStore {
     pub trusted: BTreeMap<String, TrustedIdentity>,
     /// Trusted certificate revokation list
     pub crl: BTreeSet<String>,
+    pub current_time: SystemTime,
 }
 
 /// Wrapper for a pre-parsed trusted identity for verification
@@ -22,8 +26,13 @@ pub struct TrustedIdentity {
 }
 
 impl TrustStore {
-    /// Create a new trust store with a list of trusted CAs
-    pub fn new(trusted: Vec<CertificateInner>) -> anyhow::Result<Self> {
+    /// Create a new trust store with a list of trusted CAs.
+    ///
+    /// # Security implications
+    ///
+    /// Consumers *MUST* use a secure implementation of time.
+    /// (ie, SystemTime::now() on fortanix is insecure)
+    pub fn new(current_time: SystemTime, trusted: Vec<CertificateInner>) -> anyhow::Result<Self> {
         let mut map = BTreeMap::new();
         for cert in trusted {
             let pk = (&cert)
@@ -38,6 +47,7 @@ impl TrustStore {
         Ok(Self {
             trusted: map,
             crl: Default::default(),
+            current_time,
         })
     }
 
@@ -59,6 +69,11 @@ impl TrustStore {
             .pk
             .verify_strict(&crl)
             .map_err(|e| anyhow!("failed to verify crl signature: {e}"))?;
+
+        if !crl.valid_at(self.current_time) {
+            bail!("Expired or future CRL")
+        }
+
         self.push_trusted_crl(crl);
         Ok(())
     }
@@ -69,13 +84,15 @@ impl TrustStore {
         if chain.is_empty() {
             bail!("empty certificate chain")
         }
+        if !chain.valid_at(self.current_time) {
+            bail!("cert chain contains expired or future certificates")
+        }
 
         // work through the certificate chain from the root (last) certificate
         let mut chain = chain.iter().rev().peekable();
         let mut intermediary = BTreeMap::new();
         loop {
-            // safety: we
-            let cert = chain.next().unwrap();
+            let cert = chain.next().expect("should have returned after leaf");
             let issuer = cert.tbs_certificate.issuer.to_string();
             let subject = cert.tbs_certificate.subject.to_string();
 
