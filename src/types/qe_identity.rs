@@ -145,3 +145,19 @@ pub enum QeTcbStatus {
     OutOfDate,
     Revoked,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::QuotingEnclaveIdentityAndSignature;
+
+    #[test]
+    fn parse_qe_identity_and_signature() {
+        let json = include_str!("../../data/qe_identity.json");
+        let tcb_info_and_sig: QuotingEnclaveIdentityAndSignature =
+            serde_json::from_str(json).expect("parse json");
+        println!(
+            "{}",
+            serde_json::to_string(&tcb_info_and_sig).expect("serialize json")
+        );
+    }
+}

@@ -57,18 +57,11 @@ mod tests {
     use crate::SgxCollateral;
 
     #[test]
-    fn parse_collateral_success() {
-        let json = include_str!("../../data/full_collateral.json");
-        let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
-        println!("{}", serde_json::to_string_pretty(&collat).unwrap());
-    }
-
-    #[test]
-    fn encode_decode_collateral() {
+    fn encode_decode_collateral_json() {
         let json = include_str!("../../data/full_collateral.json");
         let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
         let json2 = serde_json::to_string(&collat).expect("json to serialize");
-        println!("{json}\n\n{json2}");
+        println!("{json2}");
         let _: SgxCollateral = serde_json::from_str(&json2).expect("json2 to parse");
     }
 }
