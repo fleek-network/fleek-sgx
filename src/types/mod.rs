@@ -34,3 +34,15 @@ pub static INTEL_ROOT_CA: LazyLock<VerifyingKey> = LazyLock::new(|| {
 pub type UInt16LE = zerocopy::little_endian::U16;
 pub type UInt32LE = zerocopy::little_endian::U32;
 pub type UInt64LE = zerocopy::little_endian::U64;
+
+/// The valid tcb standings as a result of the remote attestation
+#[derive(Debug)]
+pub enum TcbStanding {
+    /// The platform is trusted
+    UpToDate,
+
+    /// The platform is on a TCB level that is trustable if it is running software with appropriate
+    /// software mitigations. The user should use another mechanism (e.g. MRENCLAVE) to verify that
+    /// the returned advisory ids have been mitigated.
+    SWHardeningNeeded { advisory_ids: Vec<String> },
+}

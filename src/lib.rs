@@ -15,7 +15,8 @@ use uuid::Uuid;
 use zerocopy::AsBytes;
 
 use crate::types::sgx_x509::SgxPckExtension;
-use crate::types::tcb_info::{TcbLevel, TcbStanding, TcbStatus};
+use crate::types::tcb_info::{TcbLevel, TcbStatus};
+use crate::types::TcbStanding;
 
 mod pki;
 mod utils;

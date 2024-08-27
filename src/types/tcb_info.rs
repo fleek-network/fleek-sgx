@@ -112,17 +112,6 @@ pub enum TcbStatus {
     Revoked,
 }
 
-#[derive(Debug)]
-pub enum TcbStanding {
-    /// The platform is trusted
-    UpToDate,
-
-    /// The platform is on a TCB level that is trustable if it is running software with appropriate
-    /// software mitigations. The user should use another mechanism (e.g. MRENCLAVE) to verify that
-    /// the returned advisory ids have been mitigated.
-    SWHardeningNeeded { advisory_ids: Vec<String> },
-}
-
 /// Contains information identifying a TcbLevel.
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone, Debug)]
 #[serde(untagged)]
