@@ -97,15 +97,26 @@ pub mod crl {
     }
 }
 
-/// wrapper to deserialize nested json from a string
-pub fn de_from_str<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: TryFrom<String>,
-    <T as TryFrom<String>>::Error: Display,
-{
-    let s = <String>::deserialize(deserializer)?;
-    T::try_from(s).map_err(de::Error::custom)
+pub mod wrap_json {
+    use serde::de::DeserializeOwned;
+    use serde::{de, ser, Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: DeserializeOwned,
+    {
+        let s = String::deserialize(deserializer)?;
+        serde_json::from_str(&s).map_err(de::Error::custom)
+    }
+    pub fn serialize<S, T>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        let string = serde_json::to_string(value).map_err(ser::Error::custom)?;
+        serializer.serialize_str(&string)
+    }
 }
 
 // From: https://github.com/signalapp/libsignal/

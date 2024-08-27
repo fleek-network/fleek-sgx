@@ -193,3 +193,18 @@ impl Tcb {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TcbInfoAndSignature;
+
+    #[test]
+    fn parse_tcb_info_and_signature() {
+        let json = include_str!("../../data/tcb_info.json");
+        let tcb_info_and_sig: TcbInfoAndSignature = serde_json::from_str(json).expect("parse json");
+        println!(
+            "{}",
+            serde_json::to_string(&tcb_info_and_sig).expect("serialize json")
+        );
+    }
+}

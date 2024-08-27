@@ -4,7 +4,7 @@ use x509_cert::Certificate;
 
 use super::qe_identity::QuotingEnclaveIdentityAndSignature;
 use super::tcb_info::TcbInfoAndSignature;
-use crate::utils::{cert_chain, crl, de_from_str};
+use crate::utils::{cert_chain, crl, wrap_json};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SgxCollateral {
@@ -36,10 +36,10 @@ pub struct SgxCollateral {
 
     /* Structured data */
     /// TCB Info structure
-    #[serde(deserialize_with = "de_from_str")]
+    #[serde(with = "wrap_json")]
     pub tcb_info: TcbInfoAndSignature,
     /// QE Identity Structure
-    #[serde(deserialize_with = "de_from_str")]
+    #[serde(with = "wrap_json")]
     pub qe_identity: QuotingEnclaveIdentityAndSignature,
 }
 
@@ -61,5 +61,14 @@ mod tests {
         let json = include_str!("../../data/full_collateral.json");
         let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
         println!("{}", serde_json::to_string_pretty(&collat).unwrap());
+    }
+
+    #[test]
+    fn encode_decode_collateral() {
+        let json = include_str!("../../data/full_collateral.json");
+        let collat: SgxCollateral = serde_json::from_str(json).expect("json to parse");
+        let json2 = serde_json::to_string(&collat).expect("json to serialize");
+        println!("{json}\n\n{json2}");
+        let _: SgxCollateral = serde_json::from_str(&json2).expect("json2 to parse");
     }
 }
