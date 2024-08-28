@@ -8,11 +8,11 @@ use crate::utils::{cert_chain, crl};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SgxCollateral {
-    /// Version = 1.
+    /// Version = 3.
     /// Not necessarily a representative of this type, but of all inner values.
     /// For example, a RA-TLS implementation might assemble this struct manually
     /// from certificate extensions.
-    #[serde(deserialize_with = "de_require_version_1")]
+    #[serde(deserialize_with = "de_require_version_3")]
     pub version: u32,
 
     /* Certficate revokation lists */
@@ -41,13 +41,12 @@ pub struct SgxCollateral {
     pub qe_identity: QuotingEnclaveIdentityAndSignature,
 }
 
-/// Deserialize a version tag, requiring the version to be 1
-pub fn de_require_version_1<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+/// Deserialize a version tag, requiring the version to be 3
+pub fn de_require_version_3<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
     let version = u32::deserialize(deserializer)?;
-    if version != 1 {
-        return Err(de::Error::custom("version must be 1"));
-    }
-    Ok(version)
+    (version == 3)
+        .then_some(version)
+        .ok_or(de::Error::custom("version must be 3"))
 }
 
 #[cfg(test)]
