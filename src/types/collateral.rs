@@ -4,7 +4,7 @@ use x509_cert::Certificate;
 
 use super::qe_identity::QuotingEnclaveIdentityAndSignature;
 use super::tcb_info::TcbInfoAndSignature;
-use crate::utils::{cert_chain, crl, wrap_json};
+use crate::utils::{cert_chain, crl};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SgxCollateral {
@@ -36,10 +36,8 @@ pub struct SgxCollateral {
 
     /* Structured data */
     /// TCB Info structure
-    #[serde(with = "wrap_json")]
     pub tcb_info: TcbInfoAndSignature,
     /// QE Identity Structure
-    #[serde(with = "wrap_json")]
     pub qe_identity: QuotingEnclaveIdentityAndSignature,
 }
 
