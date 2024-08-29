@@ -1,5 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-  "remote-attestation"
+  "lib/remote-attestation",
+  "lib/ra-tls"
 ]
