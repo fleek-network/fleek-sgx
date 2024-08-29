@@ -49,9 +49,26 @@
           # Common arguments
           commonArgs = {
             inherit src;
+            packages = [ pkgs.protobuf ];
+            nativeBuildDeps = with pkgs; [ pkg-config ];
+            buildInputs = with pkgs; [
+              cacert
+              openssl_3
+              protobufc
+              protobuf
+
+              # For linking to `dcap_quoteprov`
+              sgx-azure-dcap-client
+            ];
             strictDeps = true;
             pname = "fleek-remote-attestation";
             version = "0.1.0";
+          } // commonVars;
+
+          commonVars = {
+            OPENSSL_NO_VENDOR = 1;
+            OPENSSL_LIB_DIR = "${pkgs.lib.getLib pkgs.openssl_3}/lib";
+            OPENSSL_INCLUDE_DIR = "${pkgs.lib.getDev pkgs.openssl_3.dev}/include";
           };
 
           # Build *just* the cargo dependencies, so we can reuse all of that
@@ -91,12 +108,15 @@
           };
 
           # Allow using `nix develop` on the project
-          devShells.default = craneLib.devShell ({
-            # Inherit inputs from checks
-            checks = self.checks.${system};
-            name = "fleek-ra-dev";
-            packages = with pkgs; [ rust-analyzer ];
-          });
+          devShells.default = craneLib.devShell (
+            {
+              # Inherit inputs from checks
+              checks = self.checks.${system};
+              name = "fleek-sgx-dev";
+              packages = with pkgs; [ rust-analyzer ];
+            }
+            // commonVars
+          );
 
           # Allow using `nix fmt` on the project
           formatter = pkgs.nixfmt-rfc-style;

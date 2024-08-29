@@ -3,4 +3,11 @@ resolver = "2"
 members = [
   "lib/remote-attestation",
   "lib/ra-tls"
+  "service"
 ]
+# Isolated for nested builds
+exclude = ["service/enclave"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
