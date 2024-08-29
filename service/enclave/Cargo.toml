@@ -34,12 +34,7 @@ wasmi = "=0.36.0"
 # SGX Utilities
 sgx-isa = {version = "0.4.0", features = ["serde"] }
 
-[dependencies.fleek-remote-attestation]
-# Notes about cryptography dependencies:
-#   - p256: pure rust, from rustcrypto
-#   - x509-verify: pure rust, uses rustcrypto deps
-git = "https://github.com/fleek-network/fleek-remote-attestation"
-rev = "6414a1a9e730d74bd30402c2351e8a193f8154a0"
+fleek-remote-attestation = { path = "../../lib/remote-attestation" }
 
 [dependencies.ecies]
 # Notes about cryptography dependencies:

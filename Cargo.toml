@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
   "lib/remote-attestation",
-  "lib/ra-tls"
-  "service"
+  "lib/ra-tls",
+  "service",
 ]
 # Isolated for nested builds
 exclude = ["service/enclave"]
