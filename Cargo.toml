@@ -1,31 +1,5 @@
-[package]
-name = "fleek-remote-attestation"
-version = "0.1.0"
-edition = "2021"
-license = "GPLv3"
-
-[dependencies]
-anyhow = "1.0.86"
-
-# Encoding and decoding
-serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0.125", features = ["raw_value"]}
-hex = { version = "0.4.3", features = ["serde"]}
-chrono = { version = "0.4.38", features = ["serde"] }
-asn1 = "0.17.0"
-uuid = "1.10.0"
-
-# IO
-zerocopy = { version = "0.7.34", features = ["derive"] }
-bitflags = "2.3.3"
-
-# Rustcrypto ecosystem
-pem = "3.0.4"
-x509-cert = "0.2.5"
-p256 = "0.13.2"
-sha2 = "0.10.8"
-
-[dependencies.x509-verify]
-version = "0.4.6"
-default-features = false
-features = [ "std", "p256", "x509" ]
+[workspace]
+resolver = "2"
+members = [
+  "remote-attestation"
+]
