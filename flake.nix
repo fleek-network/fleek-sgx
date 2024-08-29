@@ -106,7 +106,6 @@
               cd $sourceRoot/service/enclave
               sourceRoot="."
             '';
-
           };
 
           # Common arguments

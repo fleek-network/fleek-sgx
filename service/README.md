@@ -1,11 +1,5 @@
 # Fleek Network SGX Service
 
-## Build Requirements
-
-```bash
-cargo install fortanix-sgx-tools sgxs-tools
-```
-
 ## Architecture
 
 The service is divided into 2 parts:
@@ -27,6 +21,17 @@ will always be read over verified blake3 streams, just like the node to node blo
 
 #### Keysharing protocol
 
-A keysharing protocol is used for private user keys
+Nodes will establish and distribute a shared secret key over encrypted RA-TLS channels. This is used to provide
+a public key any user of the network can use to encrypt data for any node's enclave. Specifically, users will encrypt
+using ECIES (secp256k1/aes-gcm).
 
-> TODO
+Nodes will connect to eachother over the in-house RA-TLS implementation, which proves an ephemeral public key
+came from a node and can be used for an encrypted and verified TLS session.
+
+Enclaves are presented the list of other peers to attempt on startup. This does not need to be verified as the
+enclave will only connect after the RA has been verified.
+
+#### Client-side Verification
+
+Clients can verify any runtime output via the ecies public key. For those that want the extra verification,
+a raw remote attestation can be generated which will prove an ephemeral key that signs off on the shared public key.
