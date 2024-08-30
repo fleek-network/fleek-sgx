@@ -6,9 +6,6 @@ edition = "2021"
 [workspace]
 
 [dependencies]
-# Project libs (release only)
-blake3-tree = "=0.1.0"
-
 # Error stuffs
 anyhow = "=1.0.86"
 thiserror = "=1.0.63"
@@ -22,6 +19,7 @@ hex = "=0.4.3"
 bs58 = "=0.5.1"
 serde = { version = "=1.0.209", features = ["derive"] }
 serde_json = "=1.0.127"
+blake3-tree = "=0.1.0"
 
 # Networking
 rouille = {git = "https://github.com/mithril-security/rouille-sgx.git", rev = "ff83153bb5870efdcf6401511f844713af6828db"}
@@ -30,8 +28,8 @@ rouille = {git = "https://github.com/mithril-security/rouille-sgx.git", rev = "f
 wasmi = "=0.36.0"
 
 # SGX Utilities
+ra-verify = { path = "../../lib/ra-verify" }
 sgx-isa = {version = "0.4.0", features = ["serde"] }
-fleek-remote-attestation = { path = "../../lib/remote-attestation" }
 
 [dependencies.ecies]
 # Notes about cryptography dependencies:

@@ -822,26 +822,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fleek-remote-attestation"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "asn1",
- "bitflags 2.6.0",
- "chrono",
- "hex",
- "p256",
- "pem 3.0.4",
- "serde",
- "serde_json",
- "sha2",
- "uuid",
- "x509-cert",
- "x509-verify",
- "zerocopy",
-]
-
-[[package]]
 name = "fleek-service-sgx"
 version = "0.1.0"
 dependencies = [
@@ -1760,9 +1740,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "der",
- "fleek-remote-attestation",
  "p256",
  "p384",
+ "ra-verify",
  "rdrand",
  "rsa",
  "rustls",
@@ -1770,6 +1750,26 @@ dependencies = [
  "serde",
  "serde_json",
  "x509-cert",
+]
+
+[[package]]
+name = "ra-verify"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "asn1",
+ "bitflags 2.6.0",
+ "chrono",
+ "hex",
+ "p256",
+ "pem 3.0.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+ "x509-cert",
+ "x509-verify",
+ "zerocopy",
 ]
 
 [[package]]

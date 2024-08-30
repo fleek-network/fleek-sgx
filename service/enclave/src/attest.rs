@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-use fleek_remote_attestation::types::collateral::SgxCollateral;
+use ra_verify::types::collateral::SgxCollateral;
 use sgx_isa::{Report, Targetinfo};
 
 /// Generate a quote and collateral for a given report data slice
