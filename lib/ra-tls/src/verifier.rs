@@ -148,6 +148,8 @@ fn verify_with_remote_attestation(
         .extensions
         .context("Extensions are missing from cert")?
     {
+        let mut san_ext_exists = false;
+        let mut attestation_ext_exists = false;
         match &ext.extn_id {
             oid if &SAN_OID == oid => {
                 let val = &ext.extn_value;
@@ -159,6 +161,7 @@ fn verify_with_remote_attestation(
                         // TODO(matthias): verify IP address?
                     }
                 }
+                san_ext_exists = true;
             },
             oid if &ATTESTATION_OID == oid => {
                 let payload: AttestationPayload = serde_json::from_slice(ext.extn_value.as_bytes())
@@ -176,10 +179,18 @@ fn verify_with_remote_attestation(
                 ) {
                     return Err(anyhow!("Failed to attest: {e:?}"));
                 }
+                attestation_ext_exists = true;
             },
             oid => {
                 return Err(anyhow!("Unknown OID found in x509 extension: {oid:?}"));
             },
+        }
+
+        if !san_ext_exists {
+            return Err(anyhow!("SAN extension is missing from certificate"));
+        }
+        if !attestation_ext_exists {
+            return Err(anyhow!("Attestation extension missing from certificate"));
         }
     }
     Ok(())
