@@ -4,17 +4,21 @@
 
 - `fleek-sgx/`
     - [`lib/`](./lib)
-        - [`remote-attestation/`](./lib/remote-attestation): verifing remote-attestations (pure rust)
-        - [`ra-tls/`](./lib/ra-tls): rustls server and client for remote attestation auth
-    - [`service/`](./service): fleek network service (runner)
-        - [`enclave/`](./service/enclave): trusted enclave for wasm tee
+        - [`dcap-quoteprov/`](./lib/dcap-quoteprov): Safe DCAP Quote Provider FFI bindings (Collateral)
+        - [`ra-tls/`](./lib/ra-tls): Remote attestation TLS implemented via Rustls and RustCrypto
+        - [`ra-verify/`](./lib/ra-verify): Verifing remote attestations implemented via RustCrypto
+    - [`service/`](./service): Fleek network service (runner)
+        - [`enclave/`](./service/enclave): Trusted enclave for WASM TEE
 
 ## Build Requirements
 
-```bash
-cargo install fortanix-sgx-tools sgxs-tools
-```
+Required cargo packages:
+- `cargo install fortanix-sgx-tools`
 
-Also requires the following system packages:
-- openssl
-- protobuf
+Optional cargo packages:
+- `cargo install sgxs-tools`
+
+Required system packages:
+- `openssl`
+- `protobuf`
+- `libsgx-dcap-default-qpl` OR any library providing `libdcap_quoteprov.so`
