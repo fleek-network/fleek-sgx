@@ -15,7 +15,15 @@ use rsa::signature::Verifier;
 use rsa::RsaPublicKey;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use rustls::{crypto, CertificateError, DigitallySignedStruct, Error, SignatureScheme};
+use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
+use rustls::{
+    crypto,
+    CertificateError,
+    DigitallySignedStruct,
+    DistinguishedName,
+    Error,
+    SignatureScheme,
+};
 use x509_cert::certificate::{CertificateInner, Rfc5280};
 use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::SubjectAltName;
@@ -33,21 +41,6 @@ pub struct RemoteAttestationVerifier {
 impl RemoteAttestationVerifier {
     pub fn new(mr_enclave: MREnclave) -> Self {
         Self { mr_enclave }
-    }
-}
-
-impl ServerCertVerifier for RemoteAttestationVerifier {
-    fn verify_server_cert(
-        &self,
-        end_entity: &CertificateDer<'_>,
-        intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> Result<ServerCertVerified, Error> {
-        verify_with_remote_attestation(&self.mr_enclave, end_entity, intermediates)
-            .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
-        Ok(ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
@@ -99,6 +92,43 @@ impl ServerCertVerifier for RemoteAttestationVerifier {
     }
 }
 
+impl ServerCertVerifier for RemoteAttestationVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
+        verify_with_remote_attestation(&self.mr_enclave, end_entity, intermediates)
+            .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.supported_verify_schemes()
+    }
+}
+
 fn verify_with_remote_attestation(
     mr_enclave: &MREnclave,
     end_entity: &CertificateDer<'_>,
@@ -131,8 +161,8 @@ fn verify_with_remote_attestation(
                 }
             },
             oid if &ATTESTATION_OID == oid => {
-                let payload: AttestationPayload =
-                    serde_json::from_slice(ext.extn_value.as_bytes()).unwrap();
+                let payload: AttestationPayload = serde_json::from_slice(ext.extn_value.as_bytes())
+                    .context("Failed to deserialize attestation payload")?;
 
                 let mut quote_bytes: &[u8] = &payload.quote;
                 let collateral: SgxCollateral = serde_json::from_str(&payload.collateral)
@@ -141,7 +171,7 @@ fn verify_with_remote_attestation(
                     // TODO(matthias): can we use system time here?
                     SystemTime::now(),
                     collateral,
-                    SgxQuote::read(&mut quote_bytes).unwrap(),
+                    SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?,
                     mr_enclave,
                 ) {
                     return Err(anyhow!("Failed to attest: {e:?}"));
@@ -153,6 +183,46 @@ fn verify_with_remote_attestation(
         }
     }
     Ok(())
+}
+
+impl ClientCertVerifier for RemoteAttestationVerifier {
+    fn root_hint_subjects(&self) -> &[DistinguishedName] {
+        // TODO(matthias): do we need this?
+        &[]
+    }
+
+    fn verify_client_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        _now: UnixTime,
+    ) -> Result<ClientCertVerified, Error> {
+        verify_with_remote_attestation(&self.mr_enclave, end_entity, intermediates)
+            .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
+        Ok(ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.supported_verify_schemes()
+    }
 }
 
 fn verify_signature(
@@ -200,7 +270,7 @@ fn verify_signature(
         },
         _ => {
             return Err(anyhow!(
-                "Unknown signature algo {}",
+                "Unknown signature algorithm {}",
                 cert.tbs_certificate.signature.oid
             ));
         },
@@ -217,7 +287,7 @@ fn verify_cert_signature(cert: &CertificateInner, signed: &CertificateInner) -> 
     let signature = signed
         .signature
         .as_bytes()
-        .context("Could not get cert signature")?;
+        .context("Certificate signature is missing")?;
 
     verify_signature(cert, &signed_data, signature, &signed.signature_algorithm)
 }
