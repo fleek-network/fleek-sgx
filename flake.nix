@@ -2,7 +2,7 @@
   description = "Fleek Remote Attestations";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:ozwaldorf/nixpkgs/sgx";
     crane = {
       url = "github:ipetkov/crane";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -36,55 +36,7 @@
       (
         system:
         let
-          pkgs = (
-            import nixpkgs {
-              inherit system;
-              overlays = [
-                (
-                  final: prev:
-                  let
-                    # Build a released package from `github.com/fortanix/rust-sgx`
-                    mkRustSgxPackage = (
-                      {
-                        pname,
-                        version,
-                        hash,
-                        cargoHash,
-                      }:
-                      prev.rustPlatform.buildRustPackage rec {
-                        inherit pname version cargoHash;
-                        nativeBuildInputs = with prev; [
-                          pkg-config
-                          protobuf
-                        ];
-                        buildInputs = with prev; [ openssl_3 ];
-                        src = prev.fetchzip {
-                          inherit hash;
-                          url = "https://crates.io/api/v1/crates/${pname}/${version}/download";
-                          extension = "tar.gz";
-                        };
-                      }
-                    );
-                  in
-                  {
-                    # todo(oz): contribute these to upstream nixpkgs
-                    fortanix-sgx-tools = mkRustSgxPackage {
-                      pname = "fortanix-sgx-tools";
-                      version = "0.5.1";
-                      hash = "sha256-F0lZG1neAPVvyOxUtDPv0t7o+ZC+aQRtpFeq55QwcmE=";
-                      cargoHash = "sha256-jYfsmPwhvt+ccUr4Vwq5q1YzNlxA+Vnpxd4KpWZrYo8=";
-                    };
-                    sgxs-tools = mkRustSgxPackage {
-                      pname = "sgxs-tools";
-                      version = "0.8.6";
-                      hash = "sha256-24lUhi4IPv+asM51/BfufkOUYVellXoXsbWXWN/zoBw=";
-                      cargoHash = "sha256-vtuOCLo7qBOfqMynykqf9folmlETx3or35+CuTurh3s=";
-                    };
-                  }
-                )
-              ];
-            }
-          );
+          pkgs = (import nixpkgs { inherit system; });
           craneLib = (crane.mkLib pkgs).overrideToolchain (
             fenix.packages.${system}.fromToolchainFile {
               dir = ./.;
@@ -127,7 +79,7 @@
               protobufc
 
               # For linking to `dcap_quoteprov`
-              sgx-azure-dcap-client
+              sgx-dcap-default-qpl
             ];
           } // commonVars;
 
