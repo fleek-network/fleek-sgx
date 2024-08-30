@@ -9,8 +9,6 @@ use serde::{Deserialize, Serialize};
 use sgx_isa::Targetinfo;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-mod collateral;
-
 const SGX_QL_ALG_ECDSA_P256: u32 = 2;
 
 #[derive(Debug)]
@@ -102,7 +100,7 @@ impl EndpointState {
     }
 
     pub fn handle_collateral(&self, quote: Vec<u8>) -> std::io::Result<Bytes> {
-        let collat = collateral::get_quote_verification_collateral(&quote)?;
+        let collat = dcap_quoteprov::SgxQlQveCollateral::new(&quote)?;
         let bytes = serde_json::to_vec(&collat)?;
         Ok(bytes.into())
     }

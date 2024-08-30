@@ -565,6 +565,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "dcap-quoteprov"
+version = "0.1.0"
+dependencies = [
+ "base16",
+ "dcap-ql",
+ "der-parser",
+ "pem 2.0.1",
+ "serde",
+ "serde_json",
+ "sgx_pkix",
+ "ureq",
+ "x509-parser",
+]
+
+[[package]]
 name = "der"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -834,27 +849,21 @@ dependencies = [
  "anyhow",
  "arrayref",
  "arrayvec",
- "base16",
  "blake3-tree",
  "bytes 1.7.1",
- "dcap-ql",
- "der-parser",
+ "dcap-quoteprov",
  "enclave-runner",
  "futures 0.3.30",
  "hex",
- "pem 2.0.1",
  "serde",
  "serde-big-array",
  "serde_cbor",
  "serde_json",
  "sgx-isa",
- "sgx_pkix",
  "sgxs-loaders 0.4.0",
  "tokio",
- "ureq",
  "url",
  "whoami",
- "x509-parser",
 ]
 
 [[package]]

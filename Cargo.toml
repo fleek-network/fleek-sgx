@@ -1,8 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-  "lib/remote-attestation",
-  "lib/ra-tls",
+  "lib/*",
   "service",
 ]
 # Isolated for nested builds
