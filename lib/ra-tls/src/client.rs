@@ -8,6 +8,7 @@ use rustls::pki_types::{CertificateDer, IpAddr, PrivateKeyDer, PrivatePkcs1KeyDe
 use rustls::{ClientConnection, StreamOwned, SupportedCipherSuite};
 
 use crate::cert::{Certificate, PrivateKey};
+use crate::codec::FramedStream;
 use crate::verifier::RemoteAttestationVerifier;
 
 #[allow(unused)]
@@ -18,7 +19,7 @@ fn connect(
     key: PrivateKey,
     cert: Certificate,
 ) -> Result<(
-    StreamOwned<ClientConnection, TcpStream>,
+    FramedStream<ClientConnection, TcpStream>,
     SupportedCipherSuite,
 )> {
     let private_key = PrivatePkcs1KeyDer::from(key);
@@ -46,5 +47,6 @@ fn connect(
         .negotiated_cipher_suite()
         .context("Failed to negotiate cipher suite failed")?;
 
-    Ok((tls, ciphersuite))
+    let mut fstream = FramedStream::from(tls);
+    Ok((fstream, ciphersuite))
 }
