@@ -29,6 +29,7 @@ wasmi = "=0.36.0"
 
 # SGX Utilities
 ra-verify = { path = "../../lib/ra-verify" }
+ra-tls = { path = "../../lib/ra-tls" }
 sgx-isa = {version = "0.4.0", features = ["serde"] }
 
 [dependencies.ecies]

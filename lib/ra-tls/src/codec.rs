@@ -1,6 +1,48 @@
 use std::io::{Read, Write};
+use std::ops::{Deref, DerefMut};
 
 use anyhow::{anyhow, Result};
+use rustls::{SideData, StreamOwned};
+
+pub const KEY_SIZE_BYTES: usize = 32;
+
+pub struct FramedStream<C: Sized, T: Read + Write + Sized> {
+    inner: StreamOwned<C, T>,
+}
+
+impl<C, T, S> FramedStream<C, T>
+where
+    C: DerefMut + Deref<Target = rustls::ConnectionCommon<S>>,
+    T: Read + Write,
+    S: SideData,
+{
+    pub fn write(&mut self, message: Codec) -> Result<()> {
+        message.write(&mut self.inner)
+    }
+
+    pub fn read(&mut self) -> Result<Codec> {
+        Codec::read(&mut self.inner)
+    }
+
+    pub fn close(self) -> Result<()> {
+        let (mut conn, mut stream) = self.inner.into_parts();
+
+        conn.send_close_notify();
+        conn.complete_io(&mut stream)?;
+        Ok(())
+    }
+}
+
+impl<C, T, S> From<StreamOwned<C, T>> for FramedStream<C, T>
+where
+    C: DerefMut + Deref<Target = rustls::ConnectionCommon<S>>,
+    T: Read + Write,
+    S: SideData,
+{
+    fn from(value: StreamOwned<C, T>) -> Self {
+        Self { inner: value }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Codec {
@@ -15,7 +57,7 @@ pub enum Request {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
-    Key(Vec<u8>),
+    Key([u8; KEY_SIZE_BYTES]),
     KeyNotFound,
 }
 
@@ -28,7 +70,6 @@ impl Codec {
             Codec::Response(res) => match res {
                 Response::Key(key) => {
                     writer.write_all(&[0xFF])?;
-                    writer.write_all(&(key.len() as u32).to_le_bytes())?;
                     writer.write_all(key)?;
                 },
                 Response::KeyNotFound => writer.write_all(&[0xFE])?,
@@ -45,12 +86,9 @@ impl Codec {
         match magic[0] {
             0x01 => Ok(Codec::Request(Request::GetKey)),
             0xFF => {
-                let mut length_bytes = [0; 4];
-                reader.read_exact(&mut length_bytes)?;
-                let length = u32::from_le_bytes(length_bytes);
-                let mut key = vec![0; length as usize];
+                let mut key = [0; KEY_SIZE_BYTES];
                 reader.read_exact(&mut key)?;
-                Ok(Codec::Response(Response::Key(key.to_vec())))
+                Ok(Codec::Response(Response::Key(key)))
             },
             0xFE => Ok(Codec::Response(Response::KeyNotFound)),
             b => Err(anyhow!("Invalid magic byte: {b}")),
@@ -82,7 +120,7 @@ mod tests {
     fn test_response_key() {
         let mut cursor = Cursor::new(vec![0; 8]);
 
-        let key = vec![1, 2, 3];
+        let key = [9; 32];
         let msg = Codec::Response(Response::Key(key));
         msg.write(&mut cursor).unwrap();
 

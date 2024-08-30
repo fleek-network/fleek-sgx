@@ -19,6 +19,7 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::Validity;
 
+// TODO(matthias): I made up this OID
 pub const ATTESTATION_OID: der::asn1::ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.3.4");
 
 pub type PrivateKey = Vec<u8>;
@@ -66,19 +67,23 @@ impl AsExtension for AttestationExtension {
     }
 }
 
-pub fn generate_key_and_cert(
-    payload: AttestationPayload,
-    validity_duration: Duration,
-    cert_key_bits: usize,
-    ip_address: String,
-    serial_number: u32,
-    subject: &str,
-) -> Result<(PrivateKey, Certificate)> {
+pub fn generate_key(cert_key_bits: usize) -> Result<(RsaPrivateKey, RsaPublicKey)> {
     let mut rng = rdrand::RdRand::new()?;
     let priv_key =
         RsaPrivateKey::new(&mut rng, cert_key_bits).context("Failed to generate private key")?;
     let pub_key = RsaPublicKey::from(&priv_key);
+    Ok((priv_key, pub_key))
+}
 
+pub fn generate_cert(
+    priv_key: RsaPrivateKey,
+    pub_key: RsaPublicKey,
+    payload: AttestationPayload,
+    validity_duration: Duration,
+    ip_address: String,
+    serial_number: u32,
+    subject: &str,
+) -> Result<(PrivateKey, Certificate)> {
     let serial_number = SerialNumber::from(serial_number);
     let validity = Validity::from_now(validity_duration)?;
     let profile = Profile::Manual { issuer: None };
@@ -101,9 +106,11 @@ pub fn generate_key_and_cert(
         OctetString::new(ip_address.as_bytes())?,
     )]))?;
 
-    let sgx_bytes =
+    let payload_bytes =
         serde_json::to_vec(&payload).context("Failed to serialize attestation payload")?;
-    let sgx_ext = AttestationExtension { data: sgx_bytes };
+    let sgx_ext = AttestationExtension {
+        data: payload_bytes,
+    };
     builder
         .add_extension(&sgx_ext)
         .context("Failed to add attestation extension")?;

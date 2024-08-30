@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use fleek_remote_attestation::types::report::MREnclave;
+use ra_verify::types::report::MREnclave;
 use rustls::pki_types::{CertificateDer, IpAddr, PrivateKeyDer, PrivatePkcs1KeyDer, ServerName};
 use rustls::{ClientConnection, StreamOwned, SupportedCipherSuite};
 

@@ -170,11 +170,15 @@ fn verify_with_remote_attestation(
                 let mut quote_bytes: &[u8] = &payload.quote;
                 let collateral: SgxCollateral = serde_json::from_str(&payload.collateral)
                     .context("Failed to deserialize SGX collateral")?;
+                let quote =
+                    SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?;
+                // TODO(matthias): extract the hash of the public key from the report data and
+                // compare it to the hash of the public key in the cert
                 if let Err(e) = verify_remote_attestation(
                     // TODO(matthias): can we use system time here?
                     SystemTime::now(),
                     collateral,
-                    SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?,
+                    quote,
                     mr_enclave,
                 ) {
                     return Err(anyhow!("Failed to attest: {e:?}"));

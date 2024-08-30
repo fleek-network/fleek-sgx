@@ -12,6 +12,7 @@ mod runtime;
 
 pub(crate) mod config {
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
+    pub const TLS_KEY_SIZE: usize = 2048;
 }
 
 /// TODO: Dummy shared key, to be replaced with the key sharing protocol.
@@ -136,6 +137,10 @@ fn main() -> anyhow::Result<()> {
         bs58::encode(&shared_key).into_string()
     );
 
+    // Generate key for TLS certificate
+    let (priv_key_tls, pub_key_tls) = ra_tls::cert::generate_key(config::TLS_KEY_SIZE)?;
+    // TODO(matthias): hash tls public key and append it to the report_data
+
     // The last 33 bytes of the report data contains the compressed shared public key.
     // The rest of the bytes are padding.
     let mut report_data = [0u8; 64];
@@ -143,6 +148,12 @@ fn main() -> anyhow::Result<()> {
     start_http_thread(4200, report_data);
 
     // TODO: spin up RA-TLS server
+    //let key_clone = key.clone();
+    //let cert_clone = cert.clone();
+    //let mr_enclave_clone = our_mrenclave.clone();
+    //std::thread::spawn(move || {
+    //    ra_tls::server::handle_requests(mr_enclave_clone, key_clone, cert_clone)
+    //});
 
     // bind to userspace address for incoming requests from handshake
     let listener = TcpListener::bind("requests.fleek.network")?;

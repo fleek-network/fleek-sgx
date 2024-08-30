@@ -1,12 +1,14 @@
-use std::io::Write;
+use std::io::Read;
 use std::net::TcpListener;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use fleek_remote_attestation::types::report::MREnclave;
+use ra_verify::types::report::MREnclave;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer};
+use rustls::ServerConnection;
 
 use crate::cert::{Certificate, PrivateKey};
+use crate::codec::{Codec, FramedStream, Request, Response, KEY_SIZE_BYTES};
 use crate::verifier::RemoteAttestationVerifier;
 
 #[allow(unused)]
@@ -15,6 +17,7 @@ pub fn handle_requests(
     key: PrivateKey,
     cert: Certificate,
     port: u16,
+    shared_priv_key: [u8; KEY_SIZE_BYTES],
 ) -> Result<()> {
     let private_key = PrivatePkcs1KeyDer::from(key);
     let private_key = PrivateKeyDer::from(private_key);
@@ -31,15 +34,22 @@ pub fn handle_requests(
     let listener =
         TcpListener::bind(format!("0.0.0.0:{}", port)).context("Failed to bind to TCP port")?;
 
-    while let Ok((mut stream, _)) = listener.accept() {
+    while let Ok((mut stream, client_ip)) = listener.accept() {
         let mut conn =
-            rustls::ServerConnection::new(config.clone()).context("Failed to connect to client")?;
-        let _res = conn.complete_io(&mut stream)?;
-        conn.writer().write_all(b"Hello from the server")?;
-        conn.complete_io(&mut stream)?;
-        // TODO(matthias): respond to requests
-        conn.send_close_notify();
-        conn.complete_io(&mut stream)?;
+            ServerConnection::new(config.clone()).context("Failed to connect to client")?;
+
+        let mut tls = rustls::StreamOwned::new(conn, stream);
+        let mut buf = [0; 5];
+        tls.read_exact(&mut buf)?;
+
+        let mut fstream = FramedStream::from(tls);
+
+        let msg = fstream.read()?;
+        if let Codec::Request(Request::GetKey) = msg {
+            fstream.write(Codec::Response(Response::Key(shared_priv_key)))?;
+        }
+
+        fstream.close()?;
     }
     Ok(())
 }
