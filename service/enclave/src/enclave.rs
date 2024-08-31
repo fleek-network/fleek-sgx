@@ -83,8 +83,11 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let _sealed_shared_secret = seal_key.seal(&secret_key.serialize())?;
+                let sealed_shared_secret = seal_key.seal(&secret_key.serialize())?;
+                let hex_str = hex::encode(&sealed_shared_secret);
                 // todo: Send to runner to save to disk
+                TcpStream::connect(&format!("{hex_str}.sealedKey.fleek.network"))
+                    .expect("Failed to send sealed key to runner");
 
                 secret_key
             },

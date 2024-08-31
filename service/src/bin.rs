@@ -1,6 +1,6 @@
-use std::fs;
+use std::fs::{self, File};
 use std::future::Future;
-use std::io::Result as IoResult;
+use std::io::{Result as IoResult, Write};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
@@ -26,6 +26,12 @@ static BLOCKSTORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 static IPC_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     std::env::var("IPC_PATH")
         .expect("IPC_PATH env variable not found")
+        .into()
+});
+static SGX_SEALED_DATA_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+    std::env::var("SGX_SEALED_DATA_PATH")
+        //.expect("SGX_SEALED_DATA_PATH env variable not found")
+        .unwrap_or(String::from("./sgx_sealed_data"))
         .into()
 });
 
@@ -68,6 +74,14 @@ impl UsercallExtension for ExternalService {
                         },
                         _ => {},
                     }
+                }
+
+                if let Some(sealed_data) = subdomain.strip_suffix(".sealedKey") {
+                    let sealed_data =
+                        hex::decode(sealed_data).expect("Failed to read sealed key data");
+                    let mut file = File::create(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
+                        .expect("Failed to create file");
+                    file.write_all(&sealed_data)?;
                 }
             }
 
@@ -158,7 +172,6 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
 
     let mut our_ip_arg = "--our-ip".as_bytes().to_vec();
     our_ip_arg.extend_from_slice(our_ip.as_bytes());
-
 
     vec![first_arg, our_ip_arg]
 }
