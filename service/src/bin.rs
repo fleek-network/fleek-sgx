@@ -1,5 +1,5 @@
+use std::fs;
 use std::future::Future;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Result as IoResult;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -106,18 +106,6 @@ impl UsercallExtension for ExternalService {
 }
 
 fn main() {
-    // Extracting platform and uid from whoami
-    let sgx_mode = if cfg!(target_env = "sgx") { "HW" } else { "SW" };
-    let platform = format!("{} - {}", whoami::platform(), sgx_mode);
-    let uid = {
-        let mut hasher = DefaultHasher::new();
-        whoami::username().hash(&mut hasher);
-        whoami::fallible::hostname().unwrap().hash(&mut hasher);
-        platform.hash(&mut hasher);
-        format!("{:X}", hasher.finish())
-    };
-    let custom_agent_id = std::env::var("CUSTOM_AGENT_ID").unwrap_or_default();
-
     // Running the enclave
     let aesm_client = AesmClient::new();
     let mut device = IsgxDevice::new()
@@ -127,17 +115,7 @@ fn main() {
 
     let mut enclave_builder = EnclaveBuilder::new_from_memory(ENCLAVE);
 
-    fn make_arg(arg_name: &str, arg_value: &str) -> Vec<u8> {
-        let mut arg = arg_name.as_bytes().to_vec();
-        arg.push(b'=');
-        arg.extend_from_slice(arg_value.as_bytes());
-        arg
-    }
-    enclave_builder.args([
-        make_arg("--uid", &uid),
-        make_arg("--platform", &platform),
-        make_arg("--custom_agent_id", &custom_agent_id),
-    ]);
+    enclave_builder.args(get_enclave_args());
 
     // setup attestation state
     let attest_state =
@@ -156,4 +134,35 @@ fn main() {
             std::process::exit(1)
         })
         .unwrap();
+}
+
+fn get_enclave_args() -> Vec<Vec<u8>> {
+    // First arg is either the sealed key or a list of peers to get it from
+    let first_arg = {
+        // todo: make a specific spot for this file
+        if let Ok(sealed_shared_key) = fs::read("./sealed_shared_key") {
+            let mut arg = "--sealed-secret-key=".as_bytes().to_vec();
+            arg.extend_from_slice(&sealed_shared_key);
+            arg
+        } else {
+            // We dont have a sealed key saved to disk so we should pass in a list of peers to get
+            // it from
+            let peers = get_peer_ips();
+            let mut arg = "--peer-ips=".as_bytes().to_vec();
+            arg.extend_from_slice(peers.join(",").as_bytes());
+            arg
+        }
+    };
+    // todo: actually get this from somewhere
+    let our_ip = "127.0.0.1";
+
+    let mut our_ip_arg = "--our-ip".as_bytes().to_vec();
+    our_ip_arg.extend_from_slice(our_ip.as_bytes());
+
+    vec![first_arg, our_ip_arg]
+}
+
+fn get_peer_ips() -> Vec<String> {
+    // todo: get this using query runner
+    vec!["127.0.0.1".to_string(), "127.0.0.2".to_string()]
 }

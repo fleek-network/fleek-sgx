@@ -28,7 +28,7 @@ pub type Certificate = Vec<u8>;
 #[derive(Serialize, Deserialize)]
 pub struct AttestationPayload {
     pub quote: Vec<u8>,
-    pub collateral: String,
+    pub collateral: Vec<u8>,
 }
 
 struct AttestationExtension {
@@ -81,13 +81,11 @@ pub fn generate_cert(
     payload: AttestationPayload,
     validity_duration: Duration,
     ip_address: String,
-    serial_number: u32,
-    subject: &str,
 ) -> Result<(PrivateKey, Certificate)> {
-    let serial_number = SerialNumber::from(serial_number);
+    let serial_number = SerialNumber::from(1u32);
     let validity = Validity::from_now(validity_duration)?;
     let profile = Profile::Manual { issuer: None };
-    let subject = Name::from_str(subject)?;
+    let subject = Name::from_str("CN=FN SGX Service,O=Fleek Network Inc,C=US")?;
     let pub_key =
         SubjectPublicKeyInfoOwned::from_key(pub_key).context("Failed to construct public key")?;
     let sign_key: SigningKey<Sha256> = SigningKey::new(priv_key.clone());

@@ -174,7 +174,7 @@ fn verify_with_remote_attestation(
                     .context("Failed to deserialize attestation payload")?;
 
                 let mut quote_bytes: &[u8] = &payload.quote;
-                let collateral: SgxCollateral = serde_json::from_str(&payload.collateral)
+                let collateral: SgxCollateral = serde_json::from_slice(&payload.collateral)
                     .context("Failed to deserialize SGX collateral")?;
                 let quote =
                     SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?;

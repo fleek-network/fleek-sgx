@@ -1,12 +1,9 @@
-use std::ops::Deref;
-
 use blake3_tree::blake3::tree::{HashTree, HashTreeBuilder};
 use blake3_tree::blake3::Hash;
 use bytes::{Bytes, BytesMut};
+use ecies::SecretKey;
 use libsecp256k1::Signature;
 use wasmi::{Config, Engine, Linker, Module, Store};
-
-use crate::SHARED_KEY;
 
 /// Verified wasm runtime output
 #[allow(unused)]
@@ -21,6 +18,7 @@ pub fn execute_module(
     module: impl AsRef<[u8]>,
     entry: &str,
     request: impl Into<Bytes>,
+    shared_secret_key: &SecretKey,
 ) -> anyhow::Result<WasmOutput> {
     let input = request.into();
     println!("input data: {input:?}");
@@ -66,7 +64,7 @@ pub fn execute_module(
     // Sign output
     let (Signature { r, s }, v) = libsecp256k1::sign(
         &libsecp256k1::Message::parse(hash.as_bytes()),
-        SHARED_KEY.deref(),
+        shared_secret_key,
     );
 
     // Encode signature, ethereum style

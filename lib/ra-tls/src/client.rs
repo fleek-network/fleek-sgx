@@ -12,7 +12,7 @@ use crate::codec::FramedStream;
 use crate::verifier::RemoteAttestationVerifier;
 
 #[allow(unused)]
-fn connect(
+pub fn connect(
     mr_enclave: MREnclave,
     server_ip: String,
     server_port: u16,
