@@ -7,6 +7,7 @@ use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
 use ra_tls::codec::{Codec, Response};
 use ra_tls::server::handle_enclave_requests;
 use ra_tls::EncodeRsaPublicKey;
+use ra_verify::types::collateral::SgxCollateral;
 use ra_verify::types::report::MREnclave;
 use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
@@ -20,6 +21,8 @@ pub struct Enclave {
     // we will take these when we start the key sharing server
     pub tls_secret_key: Option<Vec<u8>>,
     pub tls_cert: Option<Vec<u8>>,
+    pub quote: Option<Vec<u8>>,
+    pub collateral: Option<SgxCollateral>,
 }
 
 impl Enclave {
@@ -89,6 +92,8 @@ impl Enclave {
             report,
             tls_secret_key: Some(tls_secret_key),
             tls_cert: Some(tls_cert),
+            quote: Some(quote),
+            collateral: Some(collateral),
         })
     }
 

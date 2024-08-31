@@ -1,4 +1,6 @@
+use ecies::PublicKey;
 use error::EnclaveError;
+use ra_verify::types::collateral::SgxCollateral;
 use rouille::{Request, Response};
 use serde::Deserialize;
 
@@ -33,16 +35,13 @@ fn default_function_name() -> String {
     "main".into()
 }
 
-pub fn start_http_thread(port: u16, report_data: [u8; 64]) {
-    println!("Binding http attestation debug server to 0.0.0.0:{port}");
-
-    let (quote, collateral) = crate::attest::generate_for_report_data(report_data)
-        .expect("failed to generate http report data");
-
-    println!(
-        "got collat {}",
-        serde_json::to_string_pretty(&collateral).unwrap()
-    );
+pub fn start_http_thread(
+    port: u16,
+    quote: Vec<u8>,
+    collateral: SgxCollateral,
+    shared_pub_key: PublicKey,
+) {
+    println!("Binding http server to 0.0.0.0:{port}");
 
     std::thread::spawn(move || {
         rouille::start_server(("0.0.0.0", port), move |req: &Request| {
@@ -54,6 +53,9 @@ pub fn start_http_thread(port: u16, report_data: [u8; 64]) {
                 (GET)(/collateral) => {
                     Response::json(&collateral)
                 },
+                (GET)(/key) => {
+                    Response::json(&shared_pub_key.serialize_compressed().to_vec())
+                },
                 _ => {
                     Response::empty_404()
                 }
@@ -64,6 +66,12 @@ pub fn start_http_thread(port: u16, report_data: [u8; 64]) {
 
 fn main() -> Result<(), EnclaveError> {
     let mut enclave = enclave::Enclave::init()?;
+    start_http_thread(
+        8011,
+        enclave.quote.take().unwrap(),
+        enclave.collateral.take().unwrap(),
+        enclave.shared_secret.public.clone(),
+    );
     enclave.run();
     Ok(())
 }
