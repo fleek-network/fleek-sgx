@@ -14,6 +14,7 @@ pub(crate) mod config {
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
     pub const TLS_KEY_SIZE: usize = 2048;
     pub const TLS_PORT: u16 = 55855;
+    pub const HTTP_PORT: u16 = 8011;
 }
 
 #[derive(Deserialize)]
@@ -67,7 +68,7 @@ pub fn start_http_thread(
 fn main() -> Result<(), EnclaveError> {
     let mut enclave = enclave::Enclave::init()?;
     start_http_thread(
-        8011,
+        config::HTTP_PORT,
         enclave.quote.take().unwrap(),
         enclave.collateral.take().unwrap(),
         enclave.shared_secret.public.clone(),
