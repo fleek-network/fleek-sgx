@@ -1,3 +1,4 @@
+use error::EnclaveError;
 use rouille::{Request, Response};
 use serde::Deserialize;
 
@@ -61,8 +62,8 @@ pub fn start_http_thread(port: u16, report_data: [u8; 64]) {
     });
 }
 
-fn main() -> anyhow::Result<()> {
-    let mut enclave = enclave::Enclave::init();
+fn main() -> Result<(), EnclaveError> {
+    let mut enclave = enclave::Enclave::init()?;
     enclave.run();
     Ok(())
 }

@@ -23,7 +23,7 @@ pub struct Enclave {
 }
 
 impl Enclave {
-    pub fn init() -> Self {
+    pub fn init() -> Result<Self, EnclaveError> {
         let report = Report::for_self();
         let seal_key = get_seal_key(&report);
 
@@ -55,14 +55,14 @@ impl Enclave {
         )
         .unwrap();
 
-        let shared_secret_key = {
-            if let Some(encoded_secret_key) = get_encoded_secret_key_arg() {
+        let shared_secret_key = match get_shared_secret_method()? {
+            SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
                 // We already have previously recieved the secret key just need to unencrypt it
                 SecretKey::parse_slice(&seal_key.unseal(encoded_secret_key.as_bytes()))
                     .expect("Bad Sealed Shared Key")
-            } else {
+            },
+            SharedSecretMethod::FetchFromPeers(peer_ips) => {
                 // We need to get the secret key from our peers
-                let peer_ips = get_peer_ip_arg();
 
                 let secret_key = get_secret_key_from_peers(
                     peer_ips,
@@ -72,21 +72,24 @@ impl Enclave {
                 )
                 .unwrap();
 
-                // Now that we have the secret key we should seal it and send it to the runner to
-                // save to disk for next time we start up
+                // Now that we have the secret key we should seal it and send it to the runner
+                // to save to disk for next time we start up
                 let _sealed_shared_secret = seal_key.seal(&secret_key.serialize());
                 // todo: Send to runner to save to disk
 
                 secret_key
-            }
+            },
+            SharedSecretMethod::InitialNode => {
+                todo!()
+            },
         };
 
-        Self {
+        Ok(Self {
             shared_secret: KeyPair::new(shared_secret_key),
             report,
             tls_secret_key: Some(tls_secret_key),
             tls_cert: Some(tls_cert),
-        }
+        })
     }
 
     pub fn run(&mut self) {
@@ -278,4 +281,31 @@ fn get_secret_key_from_peers(
     }
 
     Err(EnclaveError::FailedToFetchSharedKey)
+}
+
+fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
+    let args = std::env::args();
+
+    for arg in args {
+        if arg.starts_with("--encoded-secret-key") {
+            return Ok(SharedSecretMethod::SealedOnDisk(
+                arg.split('=').last().unwrap().to_string(),
+            ));
+        } else if arg.starts_with("--peer-ips") {
+            let ips = arg.split("=").last().unwrap();
+
+            return Ok(SharedSecretMethod::FetchFromPeers(
+                ips.split(",").map(|ip| ip.to_string()).collect(),
+            ));
+        } else if arg.starts_with("--initial-node") {
+            return Ok(SharedSecretMethod::InitialNode);
+        }
+    }
+    Err(EnclaveError::NoPeersProvided)
+}
+
+pub enum SharedSecretMethod {
+    InitialNode,
+    SealedOnDisk(String),
+    FetchFromPeers(Vec<String>),
 }
