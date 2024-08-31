@@ -11,7 +11,6 @@ use crate::cert::{Certificate, PrivateKey};
 use crate::codec::FramedStream;
 use crate::verifier::RemoteAttestationVerifier;
 
-#[allow(unused)]
 pub fn connect(
     mr_enclave: MREnclave,
     server_ip: String,
@@ -47,6 +46,6 @@ pub fn connect(
         .negotiated_cipher_suite()
         .context("Failed to negotiate cipher suite failed")?;
 
-    let mut fstream = FramedStream::from(tls);
+    let fstream = FramedStream::from(tls);
     Ok((fstream, ciphersuite))
 }

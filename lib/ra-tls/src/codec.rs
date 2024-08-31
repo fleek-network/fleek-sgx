@@ -4,7 +4,8 @@ use std::ops::{Deref, DerefMut};
 use anyhow::{anyhow, Result};
 use rustls::{SideData, StreamOwned};
 
-pub const KEY_SIZE_BYTES: usize = 32;
+pub const SECRET_KEY_SIZE: usize = 32;
+pub const PUBLIC_KEY_SIZE: usize = 33;
 
 pub struct FramedStream<C: Sized, T: Read + Write + Sized> {
     inner: StreamOwned<C, T>,
@@ -57,7 +58,8 @@ pub enum Request {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
-    Key([u8; KEY_SIZE_BYTES]),
+    SecretKey([u8; SECRET_KEY_SIZE]),
+    PublicKey([u8; PUBLIC_KEY_SIZE]),
     KeyNotFound,
 }
 
@@ -68,11 +70,15 @@ impl Codec {
                 Request::GetKey => writer.write_all(&[0x01])?,
             },
             Codec::Response(res) => match res {
-                Response::Key(key) => {
+                Response::SecretKey(key) => {
                     writer.write_all(&[0xFF])?;
                     writer.write_all(key)?;
                 },
-                Response::KeyNotFound => writer.write_all(&[0xFE])?,
+                Response::PublicKey(key) => {
+                    writer.write_all(&[0xFE])?;
+                    writer.write_all(key)?;
+                },
+                Response::KeyNotFound => writer.write_all(&[0xFD])?,
             },
         }
         writer.flush()?;
@@ -86,11 +92,16 @@ impl Codec {
         match magic[0] {
             0x01 => Ok(Codec::Request(Request::GetKey)),
             0xFF => {
-                let mut key = [0; KEY_SIZE_BYTES];
+                let mut key = [0; SECRET_KEY_SIZE];
                 reader.read_exact(&mut key)?;
-                Ok(Codec::Response(Response::Key(key)))
+                Ok(Codec::Response(Response::SecretKey(key)))
             },
-            0xFE => Ok(Codec::Response(Response::KeyNotFound)),
+            0xFE => {
+                let mut key = [0; PUBLIC_KEY_SIZE];
+                reader.read_exact(&mut key)?;
+                Ok(Codec::Response(Response::PublicKey(key)))
+            },
+            0xFD => Ok(Codec::Response(Response::KeyNotFound)),
             b => Err(anyhow!("Invalid magic byte: {b}")),
         }
     }
@@ -121,7 +132,7 @@ mod tests {
         let mut cursor = Cursor::new(vec![0; 8]);
 
         let key = [9; 32];
-        let msg = Codec::Response(Response::Key(key));
+        let msg = Codec::Response(Response::SecretKey(key));
         msg.send(&mut cursor).unwrap();
 
         cursor.seek(SeekFrom::Start(0)).unwrap();
