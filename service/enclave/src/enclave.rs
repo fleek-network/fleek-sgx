@@ -83,7 +83,14 @@ impl Enclave {
                 secret_key
             },
             SharedSecretMethod::InitialNode => {
-                todo!()
+                let shared_secret_key = initialize_shared_secret_key(&report)?;
+
+                // Now that we have the secret key we should seal it and send it to the runner
+                // to save to disk for next time we start up
+                let _sealed_shared_secret = seal_key.seal(&shared_secret_key.serialize());
+                // todo: Send to runner to save to disk
+
+                shared_secret_key
             },
         };
 
@@ -284,6 +291,68 @@ fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
         }
     }
     Err(EnclaveError::NoPeersProvided)
+}
+
+fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveError> {
+    // Since egetkey() returns 16 bytes we will call it twice with different labels to generate 32
+    // bytes to seed the shared secret
+    let mut rng = rdrand::RdRand::new().unwrap();
+
+    let mut keyid = [0; 32];
+    {
+        let label = "Shared Secret Key Part 1".as_bytes();
+
+        let (label_dst, rand_dst) = keyid.split_at_mut(16);
+        label_dst.copy_from_slice(&label[..16]);
+        rng.try_fill_bytes(rand_dst).unwrap();
+    }
+
+    let key_part_one = Keyrequest {
+        keyname: Keyname::Seal as _,
+        keypolicy: Keypolicy::MRENCLAVE,
+        isvsvn: report.isvsvn,
+        cpusvn: report.cpusvn,
+        attributemask: [!0; 2],
+        // This field would typically be used to make a label for this seal key incase we needed a
+        // seal key in multiple parts of the enclave. Since we only need it to seal the shared
+        // secret key this should be fine
+        keyid,
+        miscmask: !0,
+        ..Default::default()
+    }
+    .egetkey()
+    .map_err(|_| EnclaveError::EGetKeyFailed)?;
+
+    let mut key_id = [0; 32];
+    {
+        let label = "Last Part of Secret Key part 2".as_bytes();
+
+        let (label_dst, rand_dst) = key_id.split_at_mut(16);
+        label_dst.copy_from_slice(&label[..16]);
+        rng.try_fill_bytes(rand_dst).unwrap();
+    }
+
+    let key_part_two = Keyrequest {
+        keyname: Keyname::Seal as _,
+        keypolicy: Keypolicy::MRENCLAVE,
+        isvsvn: report.isvsvn,
+        cpusvn: report.cpusvn,
+        attributemask: [!0; 2],
+        // This field would typically be used to make a label for this seal key incase we needed a
+        // seal key in multiple parts of the enclave. Since we only need it to seal the shared
+        // secret key this should be fine
+        keyid,
+        miscmask: !0,
+        ..Default::default()
+    }
+    .egetkey()
+    .map_err(|_| EnclaveError::EGetKeyFailed)?;
+
+    let mut shared_secret = [0; 32];
+    shared_secret[..16].copy_from_slice(&key_part_one[..16]);
+    shared_secret[16..].copy_from_slice(&key_part_two[..16]);
+
+    Ok(SecretKey::parse_slice(&shared_secret).map_err(|_| EnclaveError::GeneratedBadSharedKey)?)
 }
 
 pub enum SharedSecretMethod {

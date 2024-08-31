@@ -23,6 +23,7 @@ blake3-tree = "=0.1.0"
 
 # Crypto
 sha2 = "0.10"
+rdrand = "0.8.3"
 
 # Networking
 rouille = {git = "https://github.com/mithril-security/rouille-sgx.git", rev = "ff83153bb5870efdcf6401511f844713af6828db"}

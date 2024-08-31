@@ -159,6 +159,7 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
     let mut our_ip_arg = "--our-ip".as_bytes().to_vec();
     our_ip_arg.extend_from_slice(our_ip.as_bytes());
 
+
     vec![first_arg, our_ip_arg]
 }
 
