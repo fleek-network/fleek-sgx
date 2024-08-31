@@ -4,4 +4,10 @@ pub enum EnclaveError {
     NoPeersProvided,
     GeneratedBadSharedKey,
     EGetKeyFailed,
+    FailedToGenerateTlsKey,
+    FailedToSeal,
+    FailedToUnseal,
+    RunnerConnectionFailed,
+    BadCollateral,
+    InvalidArgs,
 }

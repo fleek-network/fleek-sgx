@@ -71,8 +71,8 @@ fn main() -> Result<(), EnclaveError> {
         config::HTTP_PORT,
         enclave.quote.take().unwrap(),
         enclave.collateral.take().unwrap(),
-        enclave.shared_secret.public.clone(),
+        enclave.shared_secret.public,
     );
-    enclave.run();
+    enclave.run()?;
     Ok(())
 }

@@ -28,14 +28,20 @@ pub struct Enclave {
 impl Enclave {
     pub fn init() -> Result<Self, EnclaveError> {
         let report = Report::for_self();
-        let seal_key = get_seal_key(&report);
+        let seal_key = get_seal_key(&report)?;
 
         // Generate key for TLS certificate
-        let (priv_key_tls, pub_key_tls) = generate_key(config::TLS_KEY_SIZE).unwrap();
+        let (priv_key_tls, pub_key_tls) =
+            generate_key(config::TLS_KEY_SIZE).map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
 
         // Append a public key to the report data for the quote
         let mut hasher = sha2::Sha256::new();
-        hasher.update(pub_key_tls.to_pkcs1_der().unwrap().as_bytes());
+        hasher.update(
+            pub_key_tls
+                .to_pkcs1_der()
+                .map_err(|_| EnclaveError::FailedToGenerateTlsKey)?
+                .as_bytes(),
+        );
         let pk_hash = hasher.finalize();
         let pk_hash_bytes = pk_hash.into_iter().collect::<Vec<_>>();
         let mut report_data = [0u8; 64];
@@ -50,18 +56,19 @@ impl Enclave {
             pub_key_tls,
             AttestationPayload {
                 quote: quote.clone(),
-                collateral: serde_json::to_vec(&collateral).unwrap(),
+                collateral: serde_json::to_vec(&collateral)
+                    .map_err(|_| EnclaveError::BadCollateral)?,
             },
             // 1 year
             Duration::from_secs(31536000),
-            get_our_ip(),
+            get_our_ip()?,
         )
-        .unwrap();
+        .map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
 
         let shared_secret_key = match get_shared_secret_method()? {
             SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
                 // We already have previously recieved the secret key just need to unencrypt it
-                SecretKey::parse_slice(&seal_key.unseal(encoded_secret_key.as_bytes()))
+                SecretKey::parse_slice(&seal_key.unseal(encoded_secret_key.as_bytes())?)
                     .expect("Bad Sealed Shared Key")
             },
             SharedSecretMethod::FetchFromPeers(peer_ips) => {
@@ -72,12 +79,11 @@ impl Enclave {
                     &tls_secret_key,
                     &tls_cert,
                     report.mrenclave,
-                )
-                .unwrap();
+                )?;
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let _sealed_shared_secret = seal_key.seal(&secret_key.serialize());
+                let _sealed_shared_secret = seal_key.seal(&secret_key.serialize())?;
                 // todo: Send to runner to save to disk
 
                 secret_key
@@ -87,7 +93,7 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let _sealed_shared_secret = seal_key.seal(&shared_secret_key.serialize());
+                let _sealed_shared_secret = seal_key.seal(&shared_secret_key.serialize())?;
                 // todo: Send to runner to save to disk
 
                 shared_secret_key
@@ -104,7 +110,7 @@ impl Enclave {
         })
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), EnclaveError> {
         // run key sharing server
         let shared_priv_key = self.shared_secret.secret.serialize();
         let tls_secret_key = self.tls_secret_key.take().expect("TLS secret key not set");
@@ -124,11 +130,14 @@ impl Enclave {
         // run wasm request server
 
         // bind to userspace address for incoming requests from handshake
-        let listener = TcpListener::bind("requests.fleek.network").unwrap();
+        let listener = TcpListener::bind("requests.fleek.network")
+            .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
 
         // Handle incoming handshake connections
         loop {
-            let (mut conn, _) = listener.accept().unwrap();
+            let (mut conn, _) = listener
+                .accept()
+                .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
             if let Err(e) = self.handle_connection(&mut conn) {
                 let error = format!("Error: {e}");
                 eprintln!("{error}");
@@ -198,16 +207,16 @@ impl KeyPair {
         }
     }
 
-    pub fn unseal(&self, msg: &[u8]) -> Vec<u8> {
-        decrypt(&self.secret.serialize(), msg).unwrap()
+    pub fn unseal(&self, msg: &[u8]) -> Result<Vec<u8>, EnclaveError> {
+        decrypt(&self.secret.serialize(), msg).map_err(|_| EnclaveError::FailedToUnseal)
     }
 
-    pub fn seal(&self, msg: &[u8]) -> Vec<u8> {
-        encrypt(&self.public.serialize(), msg).unwrap()
+    pub fn seal(&self, msg: &[u8]) -> Result<Vec<u8>, EnclaveError> {
+        encrypt(&self.public.serialize(), msg).map_err(|_| EnclaveError::FailedToSeal)
     }
 }
 
-fn get_seal_key(report: &Report) -> KeyPair {
+fn get_seal_key(report: &Report) -> Result<KeyPair, EnclaveError> {
     let key = Keyrequest {
         keyname: Keyname::Seal as _,
         keypolicy: Keypolicy::MRENCLAVE,
@@ -222,20 +231,24 @@ fn get_seal_key(report: &Report) -> KeyPair {
         ..Default::default()
     }
     .egetkey()
-    .unwrap();
+    .map_err(|_| EnclaveError::EGetKeyFailed)?;
 
     // todo: Is this safe with only [u8; 16]
-    let secret_key = SecretKey::parse_slice(&key).unwrap();
+    let secret_key = SecretKey::parse_slice(&key).map_err(|_| EnclaveError::EGetKeyFailed)?;
 
-    KeyPair::new(secret_key)
+    Ok(KeyPair::new(secret_key))
 }
 
-fn get_our_ip() -> String {
+fn get_our_ip() -> Result<String, EnclaveError> {
     let args = std::env::args();
 
     for arg in args {
         if arg.starts_with("--our-ip") {
-            return arg.split("=").last().unwrap().to_string();
+            return Ok(arg
+                .split("=")
+                .last()
+                .ok_or(EnclaveError::InvalidArgs)?
+                .to_string());
         }
     }
     panic!("Our ip was not passed to enclave");
@@ -264,7 +277,9 @@ fn get_secret_key_from_peers(
             }
 
             if let Ok(Codec::Response(Response::SecretKey(data))) = fstream.recv() {
-                return Ok(SecretKey::parse_slice(&data).unwrap());
+                if let Ok(secret_key) = SecretKey::parse_slice(&data) {
+                    return Ok(secret_key);
+                }
             }
         }
     }
@@ -278,10 +293,13 @@ fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
     for arg in args {
         if arg.starts_with("--encoded-secret-key") {
             return Ok(SharedSecretMethod::SealedOnDisk(
-                arg.split('=').last().unwrap().to_string(),
+                arg.split('=')
+                    .last()
+                    .ok_or(EnclaveError::InvalidArgs)?
+                    .to_string(),
             ));
         } else if arg.starts_with("--peer-ips") {
-            let ips = arg.split("=").last().unwrap();
+            let ips = arg.split("=").last().ok_or(EnclaveError::InvalidArgs)?;
 
             return Ok(SharedSecretMethod::FetchFromPeers(
                 ips.split(",").map(|ip| ip.to_string()).collect(),
@@ -296,7 +314,7 @@ fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
 fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveError> {
     // Since egetkey() returns 16 bytes we will call it twice with different labels to generate 32
     // bytes to seed the shared secret
-    let mut rng = rdrand::RdRand::new().unwrap();
+    let mut rng = rdrand::RdRand::new().map_err(|_| EnclaveError::EGetKeyFailed)?;
 
     let mut keyid = [0; 32];
     {
@@ -304,6 +322,7 @@ fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveErr
 
         let (label_dst, rand_dst) = keyid.split_at_mut(16);
         label_dst.copy_from_slice(&label[..16]);
+        // safe
         rng.try_fill_bytes(rand_dst).unwrap();
     }
 
@@ -352,7 +371,7 @@ fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveErr
     shared_secret[..16].copy_from_slice(&key_part_one[..16]);
     shared_secret[16..].copy_from_slice(&key_part_two[..16]);
 
-    Ok(SecretKey::parse_slice(&shared_secret).map_err(|_| EnclaveError::GeneratedBadSharedKey)?)
+    SecretKey::parse_slice(&shared_secret).map_err(|_| EnclaveError::GeneratedBadSharedKey)
 }
 
 pub enum SharedSecretMethod {
