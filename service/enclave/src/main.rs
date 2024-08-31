@@ -62,5 +62,7 @@ pub fn start_http_thread(port: u16, report_data: [u8; 64]) {
 }
 
 fn main() -> anyhow::Result<()> {
+    let mut enclave = enclave::Enclave::init();
+    enclave.run();
     Ok(())
 }
