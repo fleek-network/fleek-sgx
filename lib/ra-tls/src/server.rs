@@ -44,9 +44,9 @@ pub fn handle_requests(
 
         let mut fstream = FramedStream::from(tls);
 
-        let msg = fstream.read()?;
+        let msg = fstream.recv()?;
         if let Codec::Request(Request::GetKey) = msg {
-            fstream.write(Codec::Response(Response::Key(shared_priv_key)))?;
+            fstream.send(Codec::Response(Response::Key(shared_priv_key)))?;
         }
 
         fstream.close()?;

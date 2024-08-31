@@ -178,8 +178,6 @@ fn verify_with_remote_attestation(
                     .context("Failed to deserialize SGX collateral")?;
                 let quote =
                     SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?;
-                // TODO(matthias): extract the hash of the public key from the report data and
-                // compare it to the hash of the public key in the cert
 
                 let mut hasher = sha2::Sha256::new();
                 hasher.update(

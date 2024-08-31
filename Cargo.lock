@@ -1711,6 +1711,7 @@ dependencies = [
  "rustls-rustcrypto",
  "serde",
  "serde_json",
+ "sha2",
  "x509-cert",
 ]
 

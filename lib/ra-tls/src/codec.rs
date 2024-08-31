@@ -16,12 +16,12 @@ where
     T: Read + Write,
     S: SideData,
 {
-    pub fn write(&mut self, message: Codec) -> Result<()> {
-        message.write(&mut self.inner)
+    pub fn send(&mut self, message: Codec) -> Result<()> {
+        message.send(&mut self.inner)
     }
 
-    pub fn read(&mut self) -> Result<Codec> {
-        Codec::read(&mut self.inner)
+    pub fn recv(&mut self) -> Result<Codec> {
+        Codec::recv(&mut self.inner)
     }
 
     pub fn close(self) -> Result<()> {
@@ -62,7 +62,7 @@ pub enum Response {
 }
 
 impl Codec {
-    pub fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
+    pub fn send<W: Write>(&self, writer: &mut W) -> Result<()> {
         match self {
             Codec::Request(req) => match req {
                 Request::GetKey => writer.write_all(&[0x01])?,
@@ -79,7 +79,7 @@ impl Codec {
         Ok(())
     }
 
-    pub fn read<R: Read>(reader: &mut R) -> Result<Self> {
+    pub fn recv<R: Read>(reader: &mut R) -> Result<Self> {
         // TODO(matthias): wrap into BufReader?
         let mut magic = [0; 1];
         reader.read_exact(&mut magic)?;
@@ -108,11 +108,11 @@ mod tests {
         let mut cursor = Cursor::new(vec![0; 8]);
 
         let msg = Codec::Request(Request::GetKey);
-        msg.write(&mut cursor).unwrap();
+        msg.send(&mut cursor).unwrap();
 
         cursor.seek(SeekFrom::Start(0)).unwrap();
 
-        let msg_recv = Codec::read(&mut cursor).unwrap();
+        let msg_recv = Codec::recv(&mut cursor).unwrap();
         assert_eq!(msg, msg_recv);
     }
 
@@ -122,11 +122,11 @@ mod tests {
 
         let key = [9; 32];
         let msg = Codec::Response(Response::Key(key));
-        msg.write(&mut cursor).unwrap();
+        msg.send(&mut cursor).unwrap();
 
         cursor.seek(SeekFrom::Start(0)).unwrap();
 
-        let msg_recv = Codec::read(&mut cursor).unwrap();
+        let msg_recv = Codec::recv(&mut cursor).unwrap();
         assert_eq!(msg, msg_recv);
     }
 
@@ -135,15 +135,15 @@ mod tests {
         let mut cursor = Cursor::new(vec![0; 8]);
 
         let msg1 = Codec::Request(Request::GetKey);
-        msg1.write(&mut cursor).unwrap();
+        msg1.send(&mut cursor).unwrap();
 
         let msg2 = Codec::Response(Response::KeyNotFound);
-        msg2.write(&mut cursor).unwrap();
+        msg2.send(&mut cursor).unwrap();
 
         cursor.seek(SeekFrom::Start(0)).unwrap();
 
-        let msg1_recv = Codec::read(&mut cursor).unwrap();
-        let msg2_recv = Codec::read(&mut cursor).unwrap();
+        let msg1_recv = Codec::recv(&mut cursor).unwrap();
+        let msg2_recv = Codec::recv(&mut cursor).unwrap();
         assert_eq!(msg1, msg1_recv);
         assert_eq!(msg2, msg2_recv);
     }
