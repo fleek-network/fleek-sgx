@@ -218,29 +218,6 @@ fn get_seal_key(report: &Report) -> KeyPair {
     KeyPair::new(secret_key)
 }
 
-fn get_encoded_secret_key_arg() -> Option<String> {
-    let args = std::env::args();
-    for arg in args {
-        if arg.starts_with("--encoded-secret-key") {
-            return Some(arg.split('=').last().unwrap().to_string());
-        }
-    }
-    None
-}
-
-fn get_peer_ip_arg() -> Vec<String> {
-    let args = std::env::args();
-
-    for arg in args {
-        if arg.starts_with("--peer-ips") {
-            let ips = arg.split("=").last().unwrap();
-
-            return ips.split(",").map(|ip| ip.to_string()).collect();
-        }
-    }
-    Default::default()
-}
-
 fn get_our_ip() -> String {
     let args = std::env::args();
 
