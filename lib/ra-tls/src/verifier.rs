@@ -24,6 +24,7 @@ use rustls::{
     Error,
     SignatureScheme,
 };
+use sha2::Digest;
 use x509_cert::certificate::{CertificateInner, Rfc5280};
 use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::SubjectAltName;
@@ -143,6 +144,11 @@ fn verify_with_remote_attestation(
 
     verify_cert_signature(&x509, &x509).context("Failed to verify certificate signature")?;
 
+    let pub_key = x509
+        .tbs_certificate
+        .subject_public_key_info
+        .subject_public_key;
+
     for ext in x509
         .tbs_certificate
         .extensions
@@ -174,6 +180,22 @@ fn verify_with_remote_attestation(
                     SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?;
                 // TODO(matthias): extract the hash of the public key from the report data and
                 // compare it to the hash of the public key in the cert
+
+                let mut hasher = sha2::Sha256::new();
+                hasher.update(
+                    pub_key
+                        .as_bytes()
+                        .context("Public key is missing from cert")?,
+                );
+                let pk_hash = hasher.finalize();
+                let pk_hash_bytes = pk_hash.into_iter().collect::<Vec<_>>();
+
+                if pk_hash_bytes != quote.quote_body.report_body.sgx_report_data_bytes[..32] {
+                    return Err(anyhow!(
+                        "Public key hash in report data doesn't match cert public key hash"
+                    ));
+                }
+
                 if let Err(e) = verify_remote_attestation(
                     // TODO(matthias): can we use system time here?
                     SystemTime::now(),

@@ -20,6 +20,7 @@ p384 = "0.13"
 rdrand = "0.8.3"
 rustls = { version = "0.23", features = ["std"], default-features = false }
 rustls-rustcrypto = "0.0.2-alpha"
+sha2 = "0.10"
 
 # In house libraries
 ra-verify = { path = "../ra-verify" }
