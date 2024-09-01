@@ -149,10 +149,9 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
     // First arg is either the sealed key or a list of peers to get it from
     let first_arg = {
         // todo: make a specific spot for this file
-        if let Ok(sealed_shared_key) =
-            fs::read_to_string(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
-        {
-            format!("--sealed-secret-key={sealed_shared_key}")
+        if let Ok(sealed_shared_key) = fs::read(SGX_SEALED_DATA_PATH.join("sealedkey.bin")) {
+            let hex_encoded = hex::encode(sealed_shared_key);
+            format!("--encoded-secret-key={hex_encoded}")
                 .as_bytes()
                 .to_vec()
         } else {
