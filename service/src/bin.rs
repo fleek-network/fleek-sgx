@@ -149,7 +149,9 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
     // First arg is either the sealed key or a list of peers to get it from
     let first_arg = {
         // todo: make a specific spot for this file
-        if let Ok(sealed_shared_key) = fs::read_to_string("./sealed_shared_key") {
+        if let Ok(sealed_shared_key) =
+            fs::read_to_string(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
+        {
             format!("--sealed-secret-key={sealed_shared_key}")
                 .as_bytes()
                 .to_vec()
@@ -174,4 +176,20 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
 fn get_peer_ips() -> Vec<String> {
     // todo: get this using query runner
     vec!["127.0.0.1".to_string(), "127.0.0.2".to_string()]
+}
+
+fn get_test_args() -> (Vec<String>, bool) {
+    let args = std::env::args();
+    let mut peer_ips: Vec<String> = Vec::new();
+    let mut init = false;
+    for arg in args {
+        if arg.starts_with("--peer-ips") {
+            let ips = arg.split("=").last().unwrap();
+
+            peer_ips = ips.split(",").map(|ip| ip.to_string()).collect();
+        } else if arg.starts_with("--init") {
+            init = true;
+        }
+    }
+    (peer_ips, init)
 }
