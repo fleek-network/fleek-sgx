@@ -13,10 +13,11 @@ use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
 
 use crate::error::EnclaveError;
+use crate::seal_key::SealKeyPair;
 use crate::{blockstore, config, ServiceRequest};
 
 pub struct Enclave {
-    pub shared_secret: KeyPair,
+    pub shared_seal_key: SealKeyPair,
     pub report: Report,
     // we will take these when we start the key sharing server
     pub tls_secret_key: Option<Vec<u8>>,
@@ -65,16 +66,16 @@ impl Enclave {
         )
         .map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
 
-        let shared_secret_key = match get_shared_secret_method()? {
+        let shared_seal_key = match get_shared_secret_method()? {
             SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
                 // We already have previously recieved the secret key just need to unencrypt it
-                SecretKey::parse_slice(&seal_key.unseal(encoded_secret_key.as_bytes())?)
-                    .expect("Bad Sealed Shared Key")
+                SealKeyPair::from_secret_key_slice(&seal_key.unseal(encoded_secret_key.as_bytes())?)
+                    .map_err(|_| EnclaveError::GeneratedBadSharedKey)?
             },
             SharedSecretMethod::FetchFromPeers(peer_ips) => {
                 // We need to get the secret key from our peers
 
-                let secret_key = get_secret_key_from_peers(
+                let secret_key_pair = get_secret_key_from_peers(
                     peer_ips,
                     &tls_secret_key,
                     &tls_cert,
@@ -83,20 +84,20 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let sealed_shared_secret = seal_key.seal(&secret_key.serialize())?;
+                let sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.serialize())?;
                 let hex_str = hex::encode(&sealed_shared_secret);
                 // todo: Send to runner to save to disk
                 TcpStream::connect(&format!("{hex_str}.sealedKey.fleek.network"))
                     .expect("Failed to send sealed key to runner");
 
-                secret_key
+                secret_key_pair
             },
             SharedSecretMethod::InitialNode => {
                 let shared_secret_key = initialize_shared_secret_key(&report)?;
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let _sealed_shared_secret = seal_key.seal(&shared_secret_key.serialize())?;
+                let _sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
                 // todo: Send to runner to save to disk
 
                 shared_secret_key
@@ -104,7 +105,7 @@ impl Enclave {
         };
 
         Ok(Self {
-            shared_secret: KeyPair::new(shared_secret_key),
+            shared_seal_key,
             report,
             tls_secret_key: Some(tls_secret_key),
             tls_cert: Some(tls_cert),
@@ -115,7 +116,7 @@ impl Enclave {
 
     pub fn run(&mut self) -> Result<(), EnclaveError> {
         // run key sharing server
-        let shared_priv_key = self.shared_secret.secret.serialize();
+        let shared_priv_key = self.shared_seal_key.secret.serialize();
         let tls_secret_key = self.tls_secret_key.take().expect("TLS secret key not set");
         let tls_cert = self.tls_cert.take().expect("TLS cert not set");
         let our_mrenclave = self.report.mrenclave;
@@ -174,12 +175,12 @@ impl Enclave {
 
         // optionally decrypt the module
         if decrypt {
-            module = ecies::decrypt(&self.shared_secret.secret.serialize(), &module)?;
+            module = ecies::decrypt(&self.shared_seal_key.secret.serialize(), &module)?;
         }
 
         // run wasm module
         let output =
-            crate::runtime::execute_module(module, &function, input, &self.shared_secret.secret)?;
+            crate::runtime::execute_module(module, &function, input, &self.shared_seal_key.secret)?;
 
         // TODO: Response encodings
         //       - For http: send hash, proof, signature via headers, stream payload in response
@@ -219,7 +220,7 @@ impl KeyPair {
     }
 }
 
-fn get_seal_key(report: &Report) -> Result<KeyPair, EnclaveError> {
+fn get_seal_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
     let key = Keyrequest {
         keyname: Keyname::Seal as _,
         keypolicy: Keypolicy::MRENCLAVE,
@@ -236,10 +237,7 @@ fn get_seal_key(report: &Report) -> Result<KeyPair, EnclaveError> {
     .egetkey()
     .map_err(|_| EnclaveError::EGetKeyFailed)?;
 
-    // todo: Is this safe with only [u8; 16]
-    let secret_key = SecretKey::parse_slice(&key).map_err(|_| EnclaveError::EGetKeyFailed)?;
-
-    Ok(KeyPair::new(secret_key))
+    Ok(SealKeyPair::from_seed_key(&key))
 }
 
 fn get_our_ip() -> Result<String, EnclaveError> {
@@ -262,7 +260,7 @@ fn get_secret_key_from_peers(
     tls_private_key: &[u8],
     tls_cert: &[u8],
     our_mrenclave: MREnclave,
-) -> Result<SecretKey, EnclaveError> {
+) -> Result<SealKeyPair, EnclaveError> {
     // The runner should shuffle these peers before passing to enclave
 
     for peer in peers {
@@ -280,7 +278,7 @@ fn get_secret_key_from_peers(
             }
 
             if let Ok(Codec::Response(Response::SecretKey(data))) = fstream.recv() {
-                if let Ok(secret_key) = SecretKey::parse_slice(&data) {
+                if let Ok(secret_key) = SealKeyPair::from_secret_key_bytes(&data) {
                     return Ok(secret_key);
                 }
             }
@@ -314,14 +312,14 @@ fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
     Err(EnclaveError::NoPeersProvided)
 }
 
-fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveError> {
+fn initialize_shared_secret_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
     // Since egetkey() returns 16 bytes we will call it twice with different labels to generate 32
     // bytes to seed the shared secret
     let mut rng = rdrand::RdRand::new().map_err(|_| EnclaveError::EGetKeyFailed)?;
 
     let mut keyid = [0; 32];
     {
-        let label = "Shared Secret Key Part 1".as_bytes();
+        let label = "Shared Secret Key Label".as_bytes();
 
         let (label_dst, rand_dst) = keyid.split_at_mut(16);
         label_dst.copy_from_slice(&label[..16]);
@@ -329,7 +327,7 @@ fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveErr
         rng.try_fill_bytes(rand_dst).unwrap();
     }
 
-    let key_part_one = Keyrequest {
+    let seed_key = Keyrequest {
         keyname: Keyname::Seal as _,
         keypolicy: Keypolicy::MRENCLAVE,
         isvsvn: report.isvsvn,
@@ -345,36 +343,7 @@ fn initialize_shared_secret_key(report: &Report) -> Result<SecretKey, EnclaveErr
     .egetkey()
     .map_err(|_| EnclaveError::EGetKeyFailed)?;
 
-    let mut key_id = [0; 32];
-    {
-        let label = "Last Part of Secret Key part 2".as_bytes();
-
-        let (label_dst, rand_dst) = key_id.split_at_mut(16);
-        label_dst.copy_from_slice(&label[..16]);
-        rng.try_fill_bytes(rand_dst).unwrap();
-    }
-
-    let key_part_two = Keyrequest {
-        keyname: Keyname::Seal as _,
-        keypolicy: Keypolicy::MRENCLAVE,
-        isvsvn: report.isvsvn,
-        cpusvn: report.cpusvn,
-        attributemask: [!0; 2],
-        // This field would typically be used to make a label for this seal key incase we needed a
-        // seal key in multiple parts of the enclave. Since we only need it to seal the shared
-        // secret key this should be fine
-        keyid,
-        miscmask: !0,
-        ..Default::default()
-    }
-    .egetkey()
-    .map_err(|_| EnclaveError::EGetKeyFailed)?;
-
-    let mut shared_secret = [0; 32];
-    shared_secret[..16].copy_from_slice(&key_part_one[..16]);
-    shared_secret[16..].copy_from_slice(&key_part_two[..16]);
-
-    SecretKey::parse_slice(&shared_secret).map_err(|_| EnclaveError::GeneratedBadSharedKey)
+    Ok(SealKeyPair::from_seed_key(&seed_key))
 }
 
 pub enum SharedSecretMethod {

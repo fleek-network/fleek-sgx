@@ -9,6 +9,7 @@ mod blockstore;
 mod enclave;
 mod error;
 mod runtime;
+mod seal_key;
 
 pub(crate) mod config {
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
@@ -71,7 +72,7 @@ fn main() -> Result<(), EnclaveError> {
         config::HTTP_PORT,
         enclave.quote.take().unwrap(),
         enclave.collateral.take().unwrap(),
-        enclave.shared_secret.public,
+        enclave.shared_seal_key.public,
     );
     enclave.run()?;
     Ok(())
