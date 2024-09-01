@@ -77,12 +77,6 @@ impl UsercallExtension for ExternalService {
                         _ => {},
                     }
                 }
-
-                if let Some(sealed_data) = subdomain.strip_suffix(".sealedKey") {
-                    let mut file = File::create(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
-                        .expect("Failed to create file");
-                    file.write_all(sealed_data.as_bytes())?;
-                }
             }
 
             // Otherwise, fallback to default behavior of parsing as an ip address

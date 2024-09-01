@@ -40,7 +40,7 @@ pub fn get_collateral(quote: &[u8]) -> std::io::Result<SgxCollateral> {
 /// Send the sealed shared secret to the runner to be saved to disk
 pub fn save_sealed_key(sealed_key: Vec<u8>) {
     // This endpoint doesnt return a response
-    let _ = request("reqres", Some(&sealed_key));
+    let _ = request("put_key", Some(&sealed_key));
 }
 
 /// Request from the runner's attestation endpoint
