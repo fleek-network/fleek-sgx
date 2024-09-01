@@ -6,17 +6,17 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 
 use aesm_client::AesmClient;
-use attest::AttestationEndpoint;
 use enclave_runner::usercalls::{AsyncStream, UsercallExtension};
 use enclave_runner::EnclaveBuilder;
 use futures::FutureExt;
+use req_res::AttestationEndpoint;
 use sgxs_loaders::isgx::Device as IsgxDevice;
 
 use crate::blockstore::VerifiedStream;
 
-mod attest;
 mod blockstore;
 mod connection;
+mod req_res;
 
 static BLOCKSTORE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     std::env::var("BLOCKSTORE_PATH")
@@ -39,7 +39,7 @@ const ENCLAVE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/enclave.sgxs"))
 
 #[derive(Debug)]
 struct ExternalService {
-    attest_state: Arc<attest::EndpointState>,
+    attest_state: Arc<req_res::EndpointState>,
 }
 
 impl UsercallExtension for ExternalService {
@@ -62,9 +62,9 @@ impl UsercallExtension for ExternalService {
                 }
 
                 // Attestation APIs
-                if let Some(method) = subdomain.strip_suffix(".attest") {
+                if let Some(method) = subdomain.strip_suffix(".reqres") {
                     match method {
-                        "target_info" | "quote" | "collateral" => {
+                        "target_info" | "quote" | "collateral" | "put_key" => {
                             println!("handle {method} endpoint");
                             let stream = Box::new(AttestationEndpoint::new(
                                 method,
@@ -79,7 +79,7 @@ impl UsercallExtension for ExternalService {
                 if let Some(sealed_data) = subdomain.strip_suffix(".sealedKey") {
                     let mut file = File::create(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
                         .expect("Failed to create file");
-                    file.write_all(&sealed_data.as_bytes())?;
+                    file.write_all(sealed_data.as_bytes())?;
                 }
             }
 
@@ -130,8 +130,9 @@ fn main() {
     enclave_builder.args(get_enclave_args());
 
     // setup attestation state
-    let attest_state =
-        Arc::new(attest::EndpointState::init().expect("failed to initialize attestation endpoint"));
+    let attest_state = Arc::new(
+        req_res::EndpointState::init().expect("failed to initialize attestation endpoint"),
+    );
     println!("initialized attestation endpoint");
 
     // TODO: figure out a flow to generate a signature for the compiled enclave and committing it.

@@ -37,9 +37,15 @@ pub fn get_collateral(quote: &[u8]) -> std::io::Result<SgxCollateral> {
     Ok(collat)
 }
 
+/// Send the sealed shared secret to the runner to be saved to disk
+pub fn save_sealed_key(sealed_key: Vec<u8>) {
+    // This endpoint doesnt return a response
+    let _ = request("reqres", Some(&sealed_key));
+}
+
 /// Request from the runner's attestation endpoint
 fn request(method: &str, body: Option<&[u8]>) -> std::io::Result<Vec<u8>> {
-    let mut conn = TcpStream::connect(method.to_string() + ".attest.fleek.network")?;
+    let mut conn = TcpStream::connect(method.to_string() + ".reqres.fleek.network")?;
     println!("connected to {method}");
     if let Some(body) = body {
         conn.write_all(&(body.len() as u32).to_be_bytes())?;

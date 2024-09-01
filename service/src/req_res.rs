@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Write;
 use std::sync::Arc;
 use std::task::Waker;
 
@@ -8,6 +10,8 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
 use sgx_isa::Targetinfo;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+
+use crate::SGX_SEALED_DATA_PATH;
 
 const SGX_QL_ALG_ECDSA_P256: u32 = 2;
 
@@ -59,6 +63,7 @@ impl EndpointState {
             Request::TargetInfo => self.handle_target_info(),
             Request::Quote(report) => self.handle_quote(report),
             Request::Collateral(quote) => self.handle_collateral(quote),
+            Request::SaveKey(data) => self.handle_save_key(data),
         }
     }
 
@@ -104,6 +109,15 @@ impl EndpointState {
         let bytes = serde_json::to_vec(&collat)?;
         Ok(bytes.into())
     }
+
+    pub fn handle_save_key(&self, data: Vec<u8>) -> std::io::Result<Bytes> {
+        let mut file = File::create(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
+            .expect("Failed to create file");
+        file.write_all(&data)?;
+
+        // no need to respond with anything
+        Ok(Bytes::new())
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,6 +125,7 @@ enum Request {
     TargetInfo,
     Quote(Vec<u8>),
     Collateral(Vec<u8>),
+    SaveKey(Vec<u8>),
 }
 
 pub struct AttestationEndpoint {
@@ -176,6 +191,7 @@ impl AsyncWrite for AttestationEndpoint {
             let req = match self.method.as_ref() {
                 "quote" => Request::Quote(self.buffer.split().to_vec()),
                 "collateral" => Request::Collateral(self.buffer.split().to_vec()),
+                "put_key" => Request::SaveKey(self.buffer.split().to_vec()),
                 _ => unreachable!("handler checks methods, target info already set output"),
             };
 

@@ -2,7 +2,6 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
-use ecies::{decrypt, encrypt, PublicKey, SecretKey};
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
 use ra_tls::codec::{Codec, Response};
 use ra_tls::server::handle_enclave_requests;
@@ -12,6 +11,7 @@ use ra_verify::types::report::MREnclave;
 use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
 
+use crate::attest::save_sealed_key;
 use crate::error::EnclaveError;
 use crate::seal_key::SealKeyPair;
 use crate::{blockstore, config, ServiceRequest};
@@ -85,10 +85,7 @@ impl Enclave {
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
                 let sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.serialize())?;
-                let hex_str = hex::encode(&sealed_shared_secret);
-                // todo: Send to runner to save to disk
-                TcpStream::connect(&format!("{hex_str}.sealedKey.fleek.network"))
-                    .expect("Failed to send sealed key to runner");
+                save_sealed_key(sealed_shared_secret);
 
                 secret_key_pair
             },
@@ -97,8 +94,8 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let _sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
-                // todo: Send to runner to save to disk
+                let sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
+                save_sealed_key(sealed_shared_secret);
 
                 shared_secret_key
             },
