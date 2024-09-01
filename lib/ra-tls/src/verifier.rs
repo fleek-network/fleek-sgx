@@ -149,13 +149,13 @@ fn verify_with_remote_attestation(
         .subject_public_key_info
         .subject_public_key;
 
+    let mut san_ext_exists = false;
+    let mut attestation_ext_exists = false;
     for ext in x509
         .tbs_certificate
         .extensions
         .context("Extensions are missing from cert")?
     {
-        let mut san_ext_exists = false;
-        let mut attestation_ext_exists = false;
         match &ext.extn_id {
             oid if &SAN_OID == oid => {
                 let val = &ext.extn_value;
@@ -209,13 +209,12 @@ fn verify_with_remote_attestation(
                 return Err(anyhow!("Unknown OID found in x509 extension: {oid:?}"));
             },
         }
-
-        if !san_ext_exists {
-            return Err(anyhow!("SAN extension is missing from certificate"));
-        }
-        if !attestation_ext_exists {
-            return Err(anyhow!("Attestation extension missing from certificate"));
-        }
+    }
+    if !san_ext_exists {
+        return Err(anyhow!("SAN extension is missing from certificate"));
+    }
+    if !attestation_ext_exists {
+        return Err(anyhow!("Attestation extension missing from certificate"));
     }
     Ok(())
 }
