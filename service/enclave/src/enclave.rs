@@ -69,7 +69,7 @@ impl Enclave {
         let shared_seal_key = match get_shared_secret_method()? {
             SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
                 // We already have previously recieved the secret key just need to unencrypt it
-                SealKeyPair::from_secret_key_slice(&seal_key.unseal(encoded_secret_key.as_bytes())?)
+                SealKeyPair::from_secret_key_slice(&seal_key.unseal(&encoded_secret_key)?)
                     .map_err(|_| EnclaveError::GeneratedBadSharedKey)?
             },
             SharedSecretMethod::FetchFromPeers(peer_ips) => {
@@ -198,28 +198,6 @@ impl Enclave {
     }
 }
 
-pub struct KeyPair {
-    pub public: PublicKey,
-    secret: SecretKey,
-}
-
-impl KeyPair {
-    pub fn new(secret: SecretKey) -> Self {
-        Self {
-            public: PublicKey::from_secret_key(&secret),
-            secret,
-        }
-    }
-
-    pub fn unseal(&self, msg: &[u8]) -> Result<Vec<u8>, EnclaveError> {
-        decrypt(&self.secret.serialize(), msg).map_err(|_| EnclaveError::FailedToUnseal)
-    }
-
-    pub fn seal(&self, msg: &[u8]) -> Result<Vec<u8>, EnclaveError> {
-        encrypt(&self.public.serialize(), msg).map_err(|_| EnclaveError::FailedToSeal)
-    }
-}
-
 fn get_seal_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
     let key = Keyrequest {
         keyname: Keyname::Seal as _,
@@ -293,12 +271,14 @@ fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
 
     for arg in args {
         if arg.starts_with("--encoded-secret-key") {
-            return Ok(SharedSecretMethod::SealedOnDisk(
-                arg.split('=')
-                    .last()
-                    .ok_or(EnclaveError::InvalidArgs)?
-                    .to_string(),
-            ));
+            let hex_encoded_key = arg
+                .split('=')
+                .last()
+                .ok_or(EnclaveError::InvalidArgs)?
+                .to_string();
+
+            let key_bytes = hex::decode(hex_encoded_key).map_err(|_| EnclaveError::BadSavedKey)?;
+            return Ok(SharedSecretMethod::SealedOnDisk(key_bytes));
         } else if arg.starts_with("--peer-ips") {
             let ips = arg.split("=").last().ok_or(EnclaveError::InvalidArgs)?;
 
@@ -348,6 +328,6 @@ fn initialize_shared_secret_key(report: &Report) -> Result<SealKeyPair, EnclaveE
 
 pub enum SharedSecretMethod {
     InitialNode,
-    SealedOnDisk(String),
+    SealedOnDisk(Vec<u8>),
     FetchFromPeers(Vec<String>),
 }

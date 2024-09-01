@@ -77,11 +77,9 @@ impl UsercallExtension for ExternalService {
                 }
 
                 if let Some(sealed_data) = subdomain.strip_suffix(".sealedKey") {
-                    let sealed_data =
-                        hex::decode(sealed_data).expect("Failed to read sealed key data");
                     let mut file = File::create(SGX_SEALED_DATA_PATH.join("sealedkey.bin"))
                         .expect("Failed to create file");
-                    file.write_all(&sealed_data)?;
+                    file.write_all(&sealed_data.as_bytes())?;
                 }
             }
 
@@ -154,10 +152,10 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
     // First arg is either the sealed key or a list of peers to get it from
     let first_arg = {
         // todo: make a specific spot for this file
-        if let Ok(sealed_shared_key) = fs::read("./sealed_shared_key") {
-            let mut arg = "--sealed-secret-key=".as_bytes().to_vec();
-            arg.extend_from_slice(&sealed_shared_key);
-            arg
+        if let Ok(sealed_shared_key) = fs::read_to_string("./sealed_shared_key") {
+            format!("--sealed-secret-key={sealed_shared_key}")
+                .as_bytes()
+                .to_vec()
         } else {
             // We dont have a sealed key saved to disk so we should pass in a list of peers to get
             // it from

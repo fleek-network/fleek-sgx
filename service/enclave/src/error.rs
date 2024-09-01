@@ -10,4 +10,5 @@ pub enum EnclaveError {
     RunnerConnectionFailed,
     BadCollateral,
     InvalidArgs,
+    BadSavedKey,
 }
