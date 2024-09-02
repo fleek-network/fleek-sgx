@@ -34,39 +34,31 @@ pub fn handle_enclave_requests(
         TcpListener::bind(format!("0.0.0.0:{}", port)).context("Failed to bind to TCP port")?;
 
     while let Ok((stream, _client_ip)) = listener.accept() {
-        let conn = match ServerConnection::new(config.clone()) {
-            Ok(conn) => conn,
-            Err(e) => {
-                println!("Failed to create server connection: {e:?}");
-                continue;
-            },
+        let Ok(conn) = ServerConnection::new(config.clone()) else {
+            continue;
         };
 
         let mut tls = rustls::StreamOwned::new(conn, stream);
         let mut buf = [0; 5];
-        if let Err(e) = tls.read_exact(&mut buf) {
-            println!("Failed to read security bytes: {e:?}");
+        if tls.read_exact(&mut buf).is_err() {
             continue;
         }
 
         let mut fstream = FramedStream::from(tls);
-        let msg = match fstream.recv() {
-            Ok(msg) => msg,
-            Err(e) => {
-                println!("Failed to receive message: {e:?}");
-                continue;
-            },
+        let Ok(msg) = fstream.recv() else {
+            continue;
         };
 
         if let Codec::Request(Request::GetKey) = msg {
-            if let Err(e) = fstream.send(Codec::Response(Response::SecretKey(shared_priv_key))) {
-                println!("Failed to send response: {e:?}");
+            if fstream
+                .send(Codec::Response(Response::SecretKey(shared_priv_key)))
+                .is_err()
+            {
                 continue;
             }
         }
 
-        if let Err(e) = fstream.close() {
-            println!("Failed to close connection: {e:?}");
+        if fstream.close().is_err() {
             continue;
         }
     }
@@ -96,39 +88,31 @@ pub fn handle_client_requests(
         TcpListener::bind(format!("0.0.0.0:{}", port)).context("Failed to bind to TCP port")?;
 
     while let Ok((stream, _client_ip)) = listener.accept() {
-        let conn = match ServerConnection::new(config.clone()) {
-            Ok(conn) => conn,
-            Err(e) => {
-                println!("Failed to create server connection: {e:?}");
-                continue;
-            },
+        let Ok(conn) = ServerConnection::new(config.clone()) else {
+            continue;
         };
 
         let mut tls = rustls::StreamOwned::new(conn, stream);
         let mut buf = [0; 5];
-        if let Err(e) = tls.read_exact(&mut buf) {
-            println!("Failed to read security bytes: {e:?}");
+        if tls.read_exact(&mut buf).is_err() {
             continue;
         }
 
         let mut fstream = FramedStream::from(tls);
-
-        let msg = match fstream.recv() {
-            Ok(msg) => msg,
-            Err(e) => {
-                println!("Failed to receive message: {e:?}");
-                continue;
-            },
+        let Ok(msg) = fstream.recv() else {
+            continue;
         };
+
         if let Codec::Request(Request::GetKey) = msg {
-            if let Err(e) = fstream.send(Codec::Response(Response::PublicKey(shared_pub_key))) {
-                println!("Failed to send response: {e:?}");
+            if fstream
+                .send(Codec::Response(Response::PublicKey(shared_pub_key)))
+                .is_err()
+            {
                 continue;
             }
         }
 
-        if let Err(e) = fstream.close() {
-            println!("Failed to close connection: {e:?}");
+        if fstream.close().is_err() {
             continue;
         }
     }

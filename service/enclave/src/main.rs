@@ -8,6 +8,7 @@ mod attest;
 mod blockstore;
 mod enclave;
 mod error;
+mod http;
 mod runtime;
 mod seal_key;
 
@@ -37,38 +38,9 @@ fn default_function_name() -> String {
     "main".into()
 }
 
-pub fn start_http_thread(
-    port: u16,
-    quote: Vec<u8>,
-    collateral: SgxCollateral,
-    shared_pub_key: PublicKey,
-) {
-    println!("Binding http server to 0.0.0.0:{port}");
-
-    std::thread::spawn(move || {
-        rouille::start_server(("0.0.0.0", port), move |req: &Request| {
-            println!("got req {req:?}");
-            rouille::router!(req,
-                (GET)(/quote) => {
-                    Response::from_data("raw", quote.clone())
-                },
-                (GET)(/collateral) => {
-                    Response::json(&collateral)
-                },
-                (GET)(/key) => {
-                    Response::json(&shared_pub_key.serialize_compressed().to_vec())
-                },
-                _ => {
-                    Response::empty_404()
-                }
-            )
-        });
-    });
-}
-
 fn main() -> Result<(), EnclaveError> {
     let mut enclave = enclave::Enclave::init()?;
-    start_http_thread(
+    http::start_server(
         config::HTTP_PORT,
         enclave.quote.take().unwrap(),
         enclave.collateral.take().unwrap(),
