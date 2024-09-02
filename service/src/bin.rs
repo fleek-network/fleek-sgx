@@ -1,6 +1,6 @@
-use std::fs::{self, File};
+use std::fs;
 use std::future::Future;
-use std::io::{Result as IoResult, Write};
+use std::io::Result as IoResult;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
@@ -175,20 +175,4 @@ fn get_enclave_args() -> Vec<Vec<u8>> {
 fn get_peer_ips() -> Vec<String> {
     // todo: get this using query runner
     vec!["127.0.0.1".to_string(), "127.0.0.2".to_string()]
-}
-
-fn get_test_args() -> (Vec<String>, bool) {
-    let args = std::env::args();
-    let mut peer_ips: Vec<String> = Vec::new();
-    let mut init = false;
-    for arg in args {
-        if arg.starts_with("--peer-ips") {
-            let ips = arg.split("=").last().unwrap();
-
-            peer_ips = ips.split(",").map(|ip| ip.to_string()).collect();
-        } else if arg.starts_with("--init") {
-            init = true;
-        }
-    }
-    (peer_ips, init)
 }
