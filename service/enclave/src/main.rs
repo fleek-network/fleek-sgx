@@ -1,7 +1,5 @@
-use ecies::PublicKey;
 use error::EnclaveError;
 use ra_verify::types::collateral::SgxCollateral;
-use rouille::{Request, Response};
 use serde::Deserialize;
 
 mod attest;

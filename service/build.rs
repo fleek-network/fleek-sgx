@@ -19,7 +19,7 @@ fn main() {
             // local build for the enclave bin
             assert!(
                 std::process::Command::new("cargo")
-                    .args(["build", "--release", "--locked"])
+                    .args(["build", "--release"])
                     .current_dir("./enclave")
                     .status()
                     .unwrap()
