@@ -46,20 +46,6 @@
 
           src = craneLib.path ./.;
 
-          # TODO: patch elf into sgxs beforehand
-          fn-sgx-enclave = craneLib.buildPackage {
-            inherit src;
-            pname = "fn-sgx-enclave";
-            cargoArtifacts = null;
-            doCheck = false;
-            cargoToml = "${src}/service/enclave/Cargo.toml";
-            cargoLock = "${src}/service/enclave/Cargo.lock";
-            postUnpack = ''
-              cd $sourceRoot/service/enclave
-              sourceRoot="."
-            '';
-          };
-
           # Common arguments
           commonArgs = {
             inherit src;
@@ -87,8 +73,6 @@
             OPENSSL_NO_VENDOR = 1;
             OPENSSL_LIB_DIR = "${pkgs.lib.getLib pkgs.openssl_3}/lib";
             OPENSSL_INCLUDE_DIR = "${pkgs.lib.getDev pkgs.openssl_3.dev}/include";
-
-            FN_ENCLAVE_BIN_PATH = "${fn-sgx-enclave}/bin/fleek-service-sgx-enclave";
           };
 
           # Build *just* the cargo dependencies, so we can reuse all of that
@@ -104,9 +88,6 @@
               cargoExtraArgs = "--all";
             };
 
-            # Check doc tests
-            doc = craneLib.cargoDoc (commonArgs // { inherit cargoArtifacts; });
-
             # Check clippy lints
             clippy = craneLib.cargoClippy (
               commonArgs
@@ -116,32 +97,29 @@
               }
             );
 
-            # Run tests with cargo-nextest
+            # # Run tests with cargo-nextest
             nextest = craneLib.cargoNextest (
               commonArgs
               // {
                 inherit cargoArtifacts;
                 partitions = 1;
                 partitionType = "count";
+                cargoNextestExtraArgs = "--all --exclude fleek-service-sgx-enclave --target x86_64-unknown-linux-gnu";
               }
             );
           };
 
           packages = rec {
-            inherit fn-sgx-enclave;
-
-            default = fn-service-3;
-
-            fn-service-3 = craneLib.buildPackage (
+            default = fn-sgx-enclave;
+            fn-sgx-enclave = craneLib.buildPackage (
               commonArgs
               // {
                 inherit cargoArtifacts;
-                pname = "fn-service-3";
+                pname = "fn-sgx-enclave";
                 doCheck = false;
-                cargoExtraArgs = "--locked --bin fn-service-3";
+                cargoExtraArgs = "--locked --bin fleek-service-sgx-enclave";
               }
             );
-
           };
 
           # Allow using `nix develop` on the project
@@ -152,7 +130,6 @@
               checks = self.checks.${system};
               name = "fleek-sgx-dev";
               packages = with pkgs; [ rust-analyzer ];
-              FN_ENCLAVE_BIN_PATH = "";
             }
           );
 

@@ -18,7 +18,7 @@ pub fn start_server(
         let collat_bytes = serde_json::to_string(&collateral)
             .expect("Failed to serialize collateral")
             .into_bytes();
-        let pub_key_bytes = hex::encode(&shared_pub_key.serialize_compressed()).into_bytes();
+        let pub_key_bytes = hex::encode(shared_pub_key.serialize_compressed()).into_bytes();
 
         for stream in listener.incoming() {
             let Ok(stream) = stream else {
@@ -59,7 +59,7 @@ fn handle_connection(
 
     let (content_type, body) = match path {
         "/key" => ("text/plain", shared_pub_key),
-        "/quote" => ("raw", quote.as_ref()),
+        "/quote" => ("raw", quote),
         "/collateral" => ("application/json; charset=utf-8", collateral),
         p => return Err(anyhow!("Invalid path: {p}")),
     };

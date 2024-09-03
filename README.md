@@ -7,8 +7,7 @@
         - [`dcap-quoteprov/`](./lib/dcap-quoteprov): Safe DCAP Quote Provider FFI bindings (Collateral)
         - [`ra-tls/`](./lib/ra-tls): Remote attestation TLS implemented via Rustls and RustCrypto
         - [`ra-verify/`](./lib/ra-verify): Verifing remote attestations implemented via RustCrypto
-    - [`service/`](./service): Fleek network service (runner)
-        - [`enclave/`](./service/enclave): Trusted enclave for WASM TEE
+    - [`enclave/`](./service/enclave): Trusted enclave for WASM TEE
 
 ## Build Requirements
 
