@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
@@ -17,7 +18,8 @@ use crate::seal_key::SealKeyPair;
 use crate::{blockstore, config, ServiceRequest};
 
 pub struct Enclave {
-    pub shared_seal_key: SealKeyPair,
+    semaphore: Arc<Semaphore>,
+    pub shared_seal_key: Arc<SealKeyPair>,
     pub report: Report,
     // we will take these when we start the key sharing server
     pub tls_secret_key: Option<Vec<u8>>,
@@ -99,11 +101,13 @@ impl Enclave {
 
                 shared_secret_key
             },
-        };
+        }
+        .into();
 
         Ok(Self {
             shared_seal_key,
             report,
+            semaphore: Arc::new(Semaphore::new(config::MAX_CONCURRENT_WASM_THREADS)),
             tls_secret_key: Some(tls_secret_key),
             tls_cert: Some(tls_cert),
             quote: Some(quote),
@@ -117,18 +121,23 @@ impl Enclave {
         let tls_secret_key = self.tls_secret_key.take().expect("TLS secret key not set");
         let tls_cert = self.tls_cert.take().expect("TLS cert not set");
         let our_mrenclave = self.report.mrenclave;
-
         std::thread::spawn(move || {
             handle_enclave_requests(
                 our_mrenclave,
-                tls_secret_key,
+                tls_secret_key.clone(),
                 tls_cert,
                 config::TLS_PORT,
                 shared_priv_key,
             )
         });
 
-        // run wasm request server
+        // run debug http verification data server
+        let quote = self.quote.take().unwrap();
+        let collateral = self.collateral.take().unwrap();
+        let shared_pub_key = self.shared_seal_key.public;
+        std::thread::spawn(move || {
+            crate::http::start_server(config::HTTP_PORT, quote, collateral, shared_pub_key);
+        });
 
         // bind to userspace address for incoming requests from handshake
         let listener = TcpListener::bind("requests.fleek.network")
@@ -139,60 +148,73 @@ impl Enclave {
             let (mut conn, _) = listener
                 .accept()
                 .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
-            if let Err(e) = self.handle_connection(&mut conn) {
-                let error = format!("Error: {e}");
-                eprintln!("{error}");
-                let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
-                let _ = conn.write_all(error.as_bytes());
-            }
+
+            // Spawn a new thread to handle the connection, waiting until the semaphore has
+            // an available resource.
+            let shared_seal_key = self.shared_seal_key.clone();
+            let semaphore = self.semaphore.clone();
+            std::thread::spawn(move || {
+                // limit max concurrency and wait for our turn
+                let _ = semaphore.aquire();
+
+                // handle connection
+                if let Err(e) = handle_connection(shared_seal_key, &mut conn) {
+                    let error = format!("Error: {e}");
+                    eprintln!("{error}");
+                    let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
+                    let _ = conn.write_all(error.as_bytes());
+                }
+            });
         }
     }
+}
 
-    fn handle_connection(&self, conn: &mut TcpStream) -> anyhow::Result<()> {
-        println!("handling connection in enclave");
-        // read length delimiter
-        let mut buf = [0; 4];
-        conn.read_exact(&mut buf)?;
-        let len = u32::from_be_bytes(buf);
+fn handle_connection(
+    shared_seal_key: Arc<SealKeyPair>,
+    conn: &mut TcpStream,
+) -> anyhow::Result<()> {
+    println!("handling connection in enclave");
+    // read length delimiter
+    let mut buf = [0; 4];
+    conn.read_exact(&mut buf)?;
+    let len = u32::from_be_bytes(buf);
 
-        // read payload
-        let mut payload = vec![0; len as usize];
-        conn.read_exact(&mut payload)?;
+    // read payload
+    let mut payload = vec![0; len as usize];
+    conn.read_exact(&mut payload)?;
 
-        // parse payload
-        let ServiceRequest {
-            hash,
-            function,
-            input,
-            decrypt,
-        } = serde_json::from_slice(&payload)?;
+    // parse payload
+    let ServiceRequest {
+        hash,
+        function,
+        input,
+        decrypt,
+    } = serde_json::from_slice(&payload)?;
 
-        // fetch content from blockstore
-        let mut module = blockstore::get_verified_content(&hash)?;
+    // fetch content from blockstore
+    let mut module = blockstore::get_verified_content(&hash)?;
 
-        // optionally decrypt the module
-        if decrypt {
-            module = ecies::decrypt(&self.shared_seal_key.secret.serialize(), &module)?;
-        }
-
-        // run wasm module
-        let output =
-            crate::runtime::execute_module(module, &function, input, &self.shared_seal_key.secret)?;
-
-        // TODO: Response encodings
-        //       - For http: send hash, proof, signature via headers, stream payload in response
-        //         body. Should we also allow setting the content-type header from the wasm module?
-        //         - X-FLEEK-SGX-OUTPUT-HASH: hex encoded
-        //         - X-FLEEK-SGX-OUTPUT-TREE: base64
-        //         - X-FLEEK-SGX-OUTPUT-SIGNATURE: base64
-        //       - For all others: send hash, signature, then verified b3 stream of content
-
-        // temporary: write wasm output directly
-        conn.write_all(&(output.payload.len() as u32).to_be_bytes())?;
-        conn.write_all(&output.payload)?;
-
-        Ok(())
+    // optionally decrypt the module
+    if decrypt {
+        module = ecies::decrypt(&shared_seal_key.secret.serialize(), &module)?;
     }
+
+    // run wasm module
+    let output = crate::runtime::execute_module(module, &function, input, &shared_seal_key.secret)?;
+
+    // TODO: Response encodings
+    //       - For http: send hash, proof, signature via headers, stream payload in response body.
+    //         Should we also allow setting the content-type header from the wasm module?
+    //         - X-FLEEK-SGX-OUTPUT-HASH: hex encoded
+    //         - X-FLEEK-SGX-OUTPUT-TREE: base64
+    //         - X-FLEEK-SGX-OUTPUT-SIGNATURE: base64
+    //       - For all others: send hash, signature, then verified b3 stream of content
+
+    // temporary: write wasm output directly
+    conn.write_all(&(output.payload.len() as u32).to_be_bytes())?;
+    conn.write_all(&output.payload)?;
+
+    Ok(())
 }
 
 fn get_seal_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
@@ -327,4 +349,41 @@ pub enum SharedSecretMethod {
     InitialNode,
     SealedOnDisk(Vec<u8>),
     FetchFromPeers(Vec<String>),
+}
+
+/// Synchronous semaphore that doesn't consume any cpu time when waiting.
+struct Semaphore {
+    count: Mutex<usize>,
+    cv: Condvar,
+}
+
+impl Semaphore {
+    /// Create a new semaphore with a max resource count.
+    fn new(max: usize) -> Self {
+        Self {
+            count: Mutex::new(max),
+            cv: Condvar::new(),
+        }
+    }
+
+    /// Aquire a single resource, returning a guard.
+    fn aquire(&self) -> SemaphoreGuard {
+        let mut count = self.count.lock().expect("failed to aquire lock");
+        count = self
+            .cv
+            .wait_while(count, |c| *c == 0)
+            .expect("failed to wait for condvar");
+        *count -= 1;
+        SemaphoreGuard(self)
+    }
+}
+
+/// Guard holding a semaphore resource.
+struct SemaphoreGuard<'a>(&'a Semaphore);
+
+impl Drop for SemaphoreGuard<'_> {
+    fn drop(&mut self) {
+        *self.0.count.lock().expect("failed to aquire lock") += 1;
+        self.0.cv.notify_one();
+    }
 }

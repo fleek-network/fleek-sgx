@@ -12,21 +12,18 @@ pub fn start_server(
     collateral: SgxCollateral,
     shared_pub_key: PublicKey,
 ) {
-    std::thread::spawn(move || {
-        let listener =
-            TcpListener::bind(format!("0.0.0.0:{port}")).expect("Failed to bind to port");
-        let collat_bytes = serde_json::to_string(&collateral)
-            .expect("Failed to serialize collateral")
-            .into_bytes();
-        let pub_key_bytes = hex::encode(shared_pub_key.serialize_compressed()).into_bytes();
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("Failed to bind to port");
+    let collat_bytes = serde_json::to_string(&collateral)
+        .expect("Failed to serialize collateral")
+        .into_bytes();
+    let pub_key_bytes = hex::encode(shared_pub_key.serialize_compressed()).into_bytes();
 
-        for stream in listener.incoming() {
-            let Ok(stream) = stream else {
-                continue;
-            };
-            let _ = handle_connection(stream, &quote, &collat_bytes, &pub_key_bytes);
-        }
-    });
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else {
+            continue;
+        };
+        let _ = handle_connection(stream, &quote, &collat_bytes, &pub_key_bytes);
+    }
 }
 
 fn handle_connection(
