@@ -69,13 +69,15 @@ impl Enclave {
         )
         .map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
 
-        let shared_seal_key = match get_shared_secret_method()? {
+        let shared_seal_key = Arc::new(match get_shared_secret_method()? {
             SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
+                println!("Recovering seal key from disk");
                 // We already have previously recieved the secret key just need to unencrypt it
                 SealKeyPair::from_secret_key_slice(&seal_key.unseal(&encoded_secret_key)?)
                     .map_err(|_| EnclaveError::GeneratedBadSharedKey)?
             },
             SharedSecretMethod::FetchFromPeers(peer_ips) => {
+                println!("Fetching seal key from peers");
                 // We need to get the secret key from our peers
 
                 let secret_key_pair = get_secret_key_from_peers(
@@ -93,6 +95,7 @@ impl Enclave {
                 secret_key_pair
             },
             SharedSecretMethod::InitialNode => {
+                println!("Initializing seal key");
                 let shared_secret_key = initialize_shared_secret_key()?;
 
                 // Now that we have the secret key we should seal it and send it to the runner
@@ -102,8 +105,12 @@ impl Enclave {
 
                 shared_secret_key
             },
-        }
-        .into();
+        });
+
+        println!(
+            "Shared seal key: {}",
+            hex::encode(shared_seal_key.public.serialize_compressed())
+        );
 
         Ok(Self {
             shared_seal_key,
