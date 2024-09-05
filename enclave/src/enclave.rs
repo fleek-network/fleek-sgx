@@ -93,7 +93,7 @@ impl Enclave {
                 secret_key_pair
             },
             SharedSecretMethod::InitialNode => {
-                let shared_secret_key = initialize_shared_secret_key(&report)?;
+                let shared_secret_key = initialize_shared_secret_key()?;
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
@@ -144,28 +144,38 @@ impl Enclave {
         let listener = TcpListener::bind("requests.fleek.network")
             .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
 
-        // Handle incoming handshake connections
-        loop {
-            let (mut conn, _) = listener
-                .accept()
-                .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
+        // Setup a worker thread to spawn connection threads
+        let (tx, rx) = std::sync::mpsc::sync_channel(2048);
+        let shared_seal_key = self.shared_seal_key.clone();
+        let semaphore = self.semaphore.clone();
+        std::thread::spawn(move || {
+            while let Ok(mut conn) = rx.recv() {
+                let shared_seal_key = shared_seal_key.clone();
+                let semaphore = semaphore.clone();
 
-            // Spawn a new thread to handle the connection, waiting until the semaphore has
-            // an available resource.
-            let shared_seal_key = self.shared_seal_key.clone();
-            let semaphore = self.semaphore.clone();
-            std::thread::spawn(move || {
-                // limit max concurrency and wait for our turn
+                // Wait for limit on max concurrency
                 let _ = semaphore.aquire();
 
-                // handle connection
-                if let Err(e) = handle_connection(shared_seal_key, &mut conn) {
-                    let error = format!("Error: {e}");
-                    eprintln!("{error}");
-                    let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
-                    let _ = conn.write_all(error.as_bytes());
-                }
-            });
+                // Spawn a new thread to handle the connection
+                std::thread::spawn(move || {
+                    // handle connection
+                    if let Err(e) = handle_connection(shared_seal_key, &mut conn) {
+                        let error = format!("Error: {e}");
+                        eprintln!("{error}");
+                        let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
+                        let _ = conn.write_all(error.as_bytes());
+                    }
+                });
+            }
+        });
+
+        // Handle incoming handshake connections
+        loop {
+            let (conn, _) = listener
+                .accept()
+                .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
+            tx.send(conn)
+                .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
         }
     }
 }
@@ -211,13 +221,13 @@ fn handle_connection(
     //         - X-FLEEK-SGX-OUTPUT-SIGNATURE: base64
     //       - For all others: send hash, signature, then verified b3 stream of content
 
-    // For now, send a json header before the output data, delimiting with a `\n`
+    // For now, send a json header before the output data, delimiting with a CRLF `\r\n`
     let mut header = serde_json::to_vec(&ServiceResponseHeader {
         hash: output.hash.into(),
         tree: output.tree.into_iter().flatten().collect(),
         signature: output.signature,
     })?;
-    header.put_u8(b'\n');
+    header.put_slice(b"\r\n");
 
     let len = (header.len() + output.payload.len()) as u32;
     conn.write_all(&len.to_be_bytes())?;
@@ -322,38 +332,17 @@ fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
     Err(EnclaveError::NoPeersProvided)
 }
 
-fn initialize_shared_secret_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
-    // Since egetkey() returns 16 bytes we will call it twice with different labels to generate 32
-    // bytes to seed the shared secret
+/// generate shared secret via rdrang rng
+fn initialize_shared_secret_key() -> Result<SealKeyPair, EnclaveError> {
     let mut rng = rdrand::RdRand::new().map_err(|_| EnclaveError::EGetKeyFailed)?;
+    let mut secret = [0; 32];
 
-    let mut keyid = [0; 32];
-    {
-        let label = "Shared Secret Key Label".as_bytes();
-
-        let (label_dst, rand_dst) = keyid.split_at_mut(16);
-        label_dst.copy_from_slice(&label[..16]);
-        // safe
-        rng.try_fill_bytes(rand_dst).unwrap();
+    loop {
+        rng.try_fill_bytes(&mut secret).unwrap();
+        if let Ok(sk) = SealKeyPair::from_secret_key_bytes(&secret) {
+            return Ok(sk);
+        }
     }
-
-    let seed_key = Keyrequest {
-        keyname: Keyname::Seal as _,
-        keypolicy: Keypolicy::MRENCLAVE,
-        isvsvn: report.isvsvn,
-        cpusvn: report.cpusvn,
-        attributemask: [!0; 2],
-        // This field would typically be used to make a label for this seal key incase we needed a
-        // seal key in multiple parts of the enclave. Since we only need it to seal the shared
-        // secret key this should be fine
-        keyid,
-        miscmask: !0,
-        ..Default::default()
-    }
-    .egetkey()
-    .map_err(|_| EnclaveError::EGetKeyFailed)?;
-
-    Ok(SealKeyPair::from_seed_key(&seed_key))
 }
 
 pub enum SharedSecretMethod {

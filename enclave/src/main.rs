@@ -12,7 +12,7 @@ mod seal_key;
 
 pub(crate) mod config {
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
-    pub const MAX_CONCURRENT_WASM_THREADS: usize = 256;
+    pub const MAX_CONCURRENT_WASM_THREADS: usize = 512;
     pub const TLS_KEY_SIZE: usize = 2048;
     pub const TLS_PORT: u16 = 55855;
     pub const HTTP_PORT: u16 = 8011;
