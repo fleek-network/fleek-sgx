@@ -1,6 +1,6 @@
 use error::EnclaveError;
 use ra_verify::types::collateral::SgxCollateral;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 mod attest;
 mod blockstore;
@@ -18,7 +18,7 @@ pub(crate) mod config {
     pub const HTTP_PORT: u16 = 8011;
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct ServiceRequest {
     /// Blake3 hash of the wasm module.
     hash: String,
@@ -35,6 +35,19 @@ struct ServiceRequest {
 
 fn default_function_name() -> String {
     "main".into()
+}
+
+#[derive(Serialize, Deserialize)]
+struct ServiceResponseHeader {
+    /// Content hash
+    #[serde(with = "hex")]
+    hash: [u8; 32],
+    /// Content blake3 tree
+    #[serde(with = "hex")]
+    tree: Vec<u8>,
+    /// Network shared key signature
+    #[serde(with = "hex")]
+    signature: [u8; 65],
 }
 
 fn main() -> Result<(), EnclaveError> {

@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use bytes::BufMut;
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
 use ra_tls::codec::{Codec, Response};
 use ra_tls::server::handle_enclave_requests;
@@ -15,7 +16,7 @@ use sha2::Digest;
 use crate::attest::save_sealed_key;
 use crate::error::EnclaveError;
 use crate::seal_key::SealKeyPair;
-use crate::{blockstore, config, ServiceRequest};
+use crate::{blockstore, config, ServiceRequest, ServiceResponseHeader};
 
 pub struct Enclave {
     semaphore: Arc<Semaphore>,
@@ -210,8 +211,17 @@ fn handle_connection(
     //         - X-FLEEK-SGX-OUTPUT-SIGNATURE: base64
     //       - For all others: send hash, signature, then verified b3 stream of content
 
-    // temporary: write wasm output directly
-    conn.write_all(&(output.payload.len() as u32).to_be_bytes())?;
+    // For now, send a json header before the output data, delimiting with a `\n`
+    let mut header = serde_json::to_vec(&ServiceResponseHeader {
+        hash: output.hash.into(),
+        tree: output.tree.into_iter().flatten().collect(),
+        signature: output.signature,
+    })?;
+    header.put_u8(b'\n');
+
+    let len = (header.len() + output.payload.len()) as u32;
+    conn.write_all(&len.to_be_bytes())?;
+    conn.write_all(&header)?;
     conn.write_all(&output.payload)?;
 
     Ok(())
@@ -268,8 +278,9 @@ fn get_secret_key_from_peers(
             tls_private_key.to_vec(),
             tls_cert.to_vec(),
         ) {
-            if let Err(_e /* fuck you clippy */) =
-                fstream.send(Codec::Request(ra_tls::codec::Request::GetKey))
+            if fstream
+                .send(Codec::Request(ra_tls::codec::Request::GetKey))
+                .is_err()
             {
                 continue;
             }
