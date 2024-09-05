@@ -2,17 +2,19 @@ use error::EnclaveError;
 use ra_verify::types::collateral::SgxCollateral;
 use serde::{Deserialize, Serialize};
 
-mod attest;
 mod blockstore;
 mod enclave;
 mod error;
 mod http;
+mod req_res;
 mod runtime;
 mod seal_key;
 
 pub(crate) mod config {
+    pub const MAX_BLOCKSTORE_SIZE: usize = 16 << 20; // 16 MiB
+    pub const MAX_INPUT_SIZE: usize = 8 << 20; // 8 MiB
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
-    pub const MAX_CONCURRENT_WASM_THREADS: usize = 512;
+    pub const MAX_CONCURRENT_WASM_THREADS: usize = 128;
     pub const TLS_KEY_SIZE: usize = 2048;
     pub const TLS_PORT: u16 = 55855;
     pub const HTTP_PORT: u16 = 8011;
@@ -51,6 +53,7 @@ struct ServiceResponseHeader {
 }
 
 fn main() -> Result<(), EnclaveError> {
+    println!("enclave started");
     let mut enclave = enclave::Enclave::init()?;
     enclave.run()?;
     Ok(())

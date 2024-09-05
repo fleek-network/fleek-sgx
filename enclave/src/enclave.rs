@@ -3,6 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+use anyhow::bail;
 use bytes::BufMut;
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
 use ra_tls::codec::{Codec, Response};
@@ -13,8 +14,8 @@ use ra_verify::types::report::MREnclave;
 use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
 
-use crate::attest::save_sealed_key;
 use crate::error::EnclaveError;
+use crate::req_res::{generate_for_report_data, save_sealed_key};
 use crate::seal_key::SealKeyPair;
 use crate::{blockstore, config, ServiceRequest, ServiceResponseHeader};
 
@@ -52,8 +53,8 @@ impl Enclave {
         report_data[..32].copy_from_slice(&pk_hash_bytes[..32]);
 
         // Generate quote and collateral
-        let (quote, collateral) = crate::attest::generate_for_report_data(report_data)
-            .expect("failed to generate http report data");
+        let (quote, collateral) =
+            generate_for_report_data(report_data).expect("failed to generate http report data");
 
         let (tls_secret_key, tls_cert) = generate_cert(
             priv_key_tls,
@@ -195,10 +196,14 @@ fn handle_connection(
     // read length delimiter
     let mut buf = [0; 4];
     conn.read_exact(&mut buf)?;
-    let len = u32::from_be_bytes(buf);
+    let len = u32::from_be_bytes(buf) as usize;
+
+    if len >= config::MAX_INPUT_SIZE {
+        bail!("input too large");
+    }
 
     // read payload
-    let mut payload = vec![0; len as usize];
+    let mut payload = vec![0; len];
     conn.read_exact(&mut payload)?;
 
     // parse payload

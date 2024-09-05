@@ -51,10 +51,9 @@ fn request(method: &str, body: Option<&[u8]>) -> std::io::Result<Vec<u8>> {
         conn.write_all(&(body.len() as u32).to_be_bytes())?;
         conn.write_all(body)?;
     }
-    println!("sent req");
 
     let mut buf = Vec::new();
     conn.read_to_end(&mut buf)?;
-    println!("recv res");
+
     Ok(buf)
 }

@@ -6,6 +6,8 @@ use arrayref::array_ref;
 use blake3_tree::blake3::tree::BlockHasher;
 use blake3_tree::IncrementalVerifier;
 
+use crate::config;
+
 const LEADING_BIT: u32 = 1 << 31;
 
 /// Get some verified content from the userland.
@@ -36,8 +38,6 @@ pub fn get_verified_content(hash: &str) -> anyhow::Result<Vec<u8>> {
         // unset leading bit
         len &= !LEADING_BIT;
 
-        println!("reading {len} bytes proof={is_proof}");
-
         // read payload
         let mut payload = vec![0; len as usize];
         stream.read_exact(&mut payload)?;
@@ -50,6 +50,10 @@ pub fn get_verified_content(hash: &str) -> anyhow::Result<Vec<u8>> {
             hasher.set_block(block);
             hasher.update(&payload);
             iv.verify(hasher)?;
+
+            if content.len() + payload.len() >= config::MAX_BLOCKSTORE_SIZE {
+                bail!("blockstore content too large")
+            }
 
             content.append(&mut payload);
             block += 1;
