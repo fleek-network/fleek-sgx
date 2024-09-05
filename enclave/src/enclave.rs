@@ -162,7 +162,7 @@ impl Enclave {
                 let semaphore = semaphore.clone();
 
                 // Wait for limit on max concurrency
-                let _ = semaphore.aquire();
+                let guard = semaphore.aquire();
 
                 // Spawn a new thread to handle the connection
                 std::thread::spawn(move || {
@@ -173,6 +173,7 @@ impl Enclave {
                         let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
                         let _ = conn.write_all(error.as_bytes());
                     }
+                    drop(guard)
                 });
             }
         });
@@ -379,21 +380,23 @@ impl Semaphore {
     }
 
     /// Aquire a single resource, returning a guard.
-    fn aquire(&self) -> SemaphoreGuard {
-        let mut count = self.count.lock().expect("failed to aquire lock");
-        count = self
-            .cv
-            .wait_while(count, |c| *c == 0)
-            .expect("failed to wait for condvar");
-        *count -= 1;
+    fn aquire(self: Arc<Semaphore>) -> SemaphoreGuard {
+        {
+            let mut count = self.count.lock().expect("failed to aquire lock");
+            count = self
+                .cv
+                .wait_while(count, |c| *c == 0)
+                .expect("failed to wait for condvar");
+            *count -= 1;
+        }
         SemaphoreGuard(self)
     }
 }
 
 /// Guard holding a semaphore resource.
-struct SemaphoreGuard<'a>(&'a Semaphore);
+struct SemaphoreGuard(Arc<Semaphore>);
 
-impl Drop for SemaphoreGuard<'_> {
+impl Drop for SemaphoreGuard {
     fn drop(&mut self) {
         *self.0.count.lock().expect("failed to aquire lock") += 1;
         self.0.cv.notify_one();
