@@ -48,12 +48,22 @@ impl_define![
 /// V0 Runtime APIs
 pub mod fn0 {
     use bytes::BufMut;
-    use wasmi::{AsContextMut, Caller, Extern};
+    use wasmi::Caller;
 
     use super::HostState;
 
-    /// Alias for the caller context
+    /// Alias for the ctx context
     type Ctx<'a> = Caller<'a, HostState>;
+
+    /// Various host errors
+    #[repr(i32)]
+    enum HostError {
+        /// Specified pointers were out of bounds
+        OutOfBounds = -1,
+        /// Unexpected error
+        #[allow(unused)]
+        Unexpected = -99,
+    }
 
     /// Gets the size of the input data. For use with [`fn0.input_data_copy`](input_data_copy).
     ///
@@ -76,27 +86,20 @@ pub mod fn0 {
     /// # Returns
     ///
     /// * ` 0`: success
-    /// * `-1`: memory not found
-    /// * `-2`: out of bounds
-    /// * `-3`: unexpected error
+    /// * `<0`: Host error
     pub fn input_data_copy(mut ctx: Ctx, dst: u32, offset: u32, len: u32) -> i32 {
         let dst = dst as usize;
         let offset = offset as usize;
         let size = len as usize;
 
-        // TODO: perform this validation ahead of time when loading the wasm, before calling main
-        let Some(Extern::Memory(memory)) = ctx.get_export("memory") else {
-            return -1;
-        };
-
-        let ctx = ctx.as_context_mut();
-        let (memory, state) = memory.data_and_store_mut(ctx);
+        let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
+        let (memory, state) = memory.data_and_store_mut(&mut ctx);
 
         let Some(region) = memory.get_mut(dst..(dst + size)) else {
-            return -2;
+            return HostError::OutOfBounds as i32;
         };
         let Some(buffer) = state.input.get(offset..(offset + size)) else {
-            return -2;
+            return HostError::OutOfBounds as i32;
         };
 
         region.copy_from_slice(buffer);
@@ -114,27 +117,20 @@ pub mod fn0 {
     /// # Returns
     ///
     /// * ` 0`: success
-    /// * `-1`: memory not found
-    /// * `-2`: out of bounds
-    /// * `-3`: unexpected error
-    pub fn output_data_append(mut caller: Ctx, ptr: u32, len: u32) -> i32 {
+    /// * `<0`: Host error
+    pub fn output_data_append(mut ctx: Ctx, ptr: u32, len: u32) -> i32 {
         let ptr = ptr as usize;
         let len = len as usize;
 
-        // TODO: perform this validation ahead of time when loading the wasm, before calling main
-        let Some(Extern::Memory(memory)) = caller.get_export("memory") else {
-            return -1;
-        };
-
-        let ctx = caller.as_context_mut();
-        let (memory, state) = memory.data_and_store_mut(ctx);
+        let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
+        let (memory, state) = memory.data_and_store_mut(&mut ctx);
 
         if state.output.len() > crate::config::MAX_OUTPUT_SIZE {
-            return -2;
+            return HostError::OutOfBounds as i32;
         }
 
         let Some(region) = memory.get(ptr..(ptr + len)) else {
-            return -2;
+            return HostError::OutOfBounds as i32;
         };
 
         // hash and store the data
