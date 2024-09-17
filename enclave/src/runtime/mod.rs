@@ -1,3 +1,4 @@
+use anyhow::bail;
 use blake3_tree::blake3::tree::HashTree;
 use blake3_tree::blake3::Hash;
 use bytes::Bytes;
@@ -47,6 +48,10 @@ pub fn execute_module(
     // Initialize the module
     let module = Module::new(&engine, module.as_ref())?;
     let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
+
+    if instance.get_memory(&mut store, "memory").is_none() {
+        bail!("`memory` not found in wasm instance")
+    }
 
     // Get entrypoint function and call it
     // TODO(oz): Should we support calling the function with `int argc, *argv[]`?
