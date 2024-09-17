@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{anyhow, Result};
-use ra_tls::{ConnectionCommon, SideData, StreamOwned};
+use ra_tls::rustls::{ConnectionCommon, SideData, StreamOwned};
 
 pub const SECRET_KEY_SIZE: usize = 32;
 pub const PUBLIC_KEY_SIZE: usize = 33;
@@ -27,7 +27,6 @@ where
 
     pub fn close(self) -> Result<()> {
         let (mut conn, mut stream) = self.inner.into_parts();
-
         conn.send_close_notify();
         conn.complete_io(&mut stream)?;
         Ok(())
