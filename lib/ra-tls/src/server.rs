@@ -1,120 +1,62 @@
-use std::io::Read;
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Context;
 use ra_verify::types::report::MREnclave;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs1KeyDer};
-use rustls::ServerConnection;
+use rustls::{ServerConfig, ServerConnection, StreamOwned};
 
 use crate::cert::{Certificate, PrivateKey};
-use crate::codec::{Codec, FramedStream, Request, Response, PUBLIC_KEY_SIZE, SECRET_KEY_SIZE};
 use crate::verifier::RemoteAttestationVerifier;
 
-pub fn handle_enclave_requests(
-    mr_enclave: MREnclave,
-    key: PrivateKey,
-    cert: Certificate,
-    port: u16,
-    shared_priv_key: [u8; SECRET_KEY_SIZE],
-) -> Result<()> {
-    let private_key = PrivatePkcs1KeyDer::from(key);
-    let private_key = PrivateKeyDer::from(private_key);
-    let cert = CertificateDer::from(cert);
-
-    let config =
-        rustls::ServerConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
-            .with_safe_default_protocol_versions()?
-            .with_client_cert_verifier(Arc::new(RemoteAttestationVerifier::new(mr_enclave)))
-            .with_single_cert(vec![cert], private_key)
-            .context("Failed to build server config")?;
-    let config = Arc::new(config);
-
-    let listener =
-        TcpListener::bind(format!("0.0.0.0:{}", port)).context("Failed to bind to TCP port")?;
-
-    while let Ok((stream, _client_ip)) = listener.accept() {
-        let Ok(conn) = ServerConnection::new(config.clone()) else {
-            continue;
-        };
-
-        let mut tls = rustls::StreamOwned::new(conn, stream);
-        let mut buf = [0; 5];
-        if tls.read_exact(&mut buf).is_err() {
-            continue;
-        }
-
-        let mut fstream = FramedStream::from(tls);
-        let Ok(msg) = fstream.recv() else {
-            continue;
-        };
-
-        if let Codec::Request(Request::GetKey) = msg {
-            if fstream
-                .send(Codec::Response(Response::SecretKey(shared_priv_key)))
-                .is_err()
-            {
-                continue;
-            }
-        }
-
-        if fstream.close().is_err() {
-            continue;
-        }
-    }
-    Ok(())
+pub struct RaTlsListener {
+    config: Arc<ServerConfig>,
+    inner: TcpListener,
 }
 
-#[allow(unused)]
-pub fn handle_client_requests(
-    key: PrivateKey,
-    cert: Certificate,
-    port: u16,
-    shared_pub_key: [u8; PUBLIC_KEY_SIZE],
-) -> Result<()> {
-    let private_key = PrivatePkcs1KeyDer::from(key);
-    let private_key = PrivateKeyDer::from(private_key);
-    let cert = CertificateDer::from(cert);
+impl RaTlsListener {
+    /// Bind a new ra-tls listener.
+    /// Pass an expected MREnclave to use RA client authentication, or none
+    /// for no client auth.
+    pub fn bind(
+        mr_enclave: Option<MREnclave>,
+        key: PrivateKey,
+        cert: Certificate,
+        port: u16,
+    ) -> anyhow::Result<Self> {
+        let private_key = PrivatePkcs1KeyDer::from(key);
+        let private_key = PrivateKeyDer::from(private_key);
+        let cert = CertificateDer::from(cert);
 
-    let config =
-        rustls::ServerConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
-            .with_safe_default_protocol_versions()?
-            .with_no_client_auth()
-            .with_single_cert(vec![cert], private_key)
-            .context("Failed to build server config")?;
-    let config = Arc::new(config);
-
-    let listener =
-        TcpListener::bind(format!("0.0.0.0:{}", port)).context("Failed to bind to TCP port")?;
-
-    while let Ok((stream, _client_ip)) = listener.accept() {
-        let Ok(conn) = ServerConnection::new(config.clone()) else {
-            continue;
+        let config = if let Some(mr_enclave) = mr_enclave {
+            rustls::ServerConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
+                .with_safe_default_protocol_versions()?
+                .with_client_cert_verifier(Arc::new(RemoteAttestationVerifier::new(mr_enclave)))
+                .with_single_cert(vec![cert], private_key)
+                .context("Failed to build server config")?
+        } else {
+            rustls::ServerConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
+                .with_safe_default_protocol_versions()?
+                .with_no_client_auth()
+                .with_single_cert(vec![cert], private_key)
+                .context("Failed to build server config")?
         };
+        let config = Arc::new(config);
 
-        let mut tls = rustls::StreamOwned::new(conn, stream);
-        let mut buf = [0; 5];
-        if tls.read_exact(&mut buf).is_err() {
-            continue;
-        }
+        let inner =
+            TcpListener::bind(format!("0.0.0.0:{}", port)).context("Failed to bind to TCP port")?;
 
-        let mut fstream = FramedStream::from(tls);
-        let Ok(msg) = fstream.recv() else {
-            continue;
-        };
+        Ok(Self { config, inner })
+    }
 
-        if let Codec::Request(Request::GetKey) = msg {
-            if fstream
-                .send(Codec::Response(Response::PublicKey(shared_pub_key)))
-                .is_err()
-            {
+    pub fn accept(&mut self) -> anyhow::Result<StreamOwned<ServerConnection, TcpStream>> {
+        loop {
+            let (stream, _) = self.inner.accept()?;
+            let Ok(conn) = ServerConnection::new(self.config.clone()) else {
                 continue;
-            }
-        }
-
-        if fstream.close().is_err() {
-            continue;
+            };
+            let tls = StreamOwned::new(conn, stream);
+            return Ok(tls);
         }
     }
-    Ok(())
 }
