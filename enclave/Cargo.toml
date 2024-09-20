@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# WASM Runtime
+wasmi = "=0.36.1"
+quick_cache = "=0.6.9"
+
 # Error stuffs
 anyhow = "=1.0.89"
 thiserror = "=1.0.63"
 
 # IO
 arrayref = "=0.3.9"
-bytes = "=1.7.1"
+bytes = "=1.7.2"
 
 # Encodings
 hex = "=0.4.3"
@@ -19,17 +23,15 @@ serde = { version = "=1.0.210", features = ["derive"] }
 serde_json = "=1.0.128"
 blake3-tree = "=0.1.0"
 
-# Crypto
-sha2 = "0.10"
-rdrand = "0.8.3"
-
-# WASM Runtime
-wasmi = "=0.36.0"
-
 # SGX Utilities
+sgx-isa = {version = "0.4.0", features = ["serde"] }
 ra-verify = { path = "../lib/ra-verify" }
 ra-tls = { path = "../lib/ra-tls" }
-sgx-isa = {version = "0.4.0", features = ["serde"] }
+
+# Crypto
+sha2 = "=0.10"
+rdrand = "=0.8.3"
+libsecp256k1  = "=0.7.1"
 
 [dependencies.ecies]
 # Notes about cryptography dependencies:
@@ -40,5 +42,7 @@ version = "=0.2.7"
 default-features = false
 features = ["pure", "std"]
 
-[dependencies.libsecp256k1]
-version = "0.7.1"
+[dependencies.bip32]
+version = "0.5.2"
+default-features = false
+features = ["std", "k256"]

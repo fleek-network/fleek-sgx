@@ -116,11 +116,11 @@ pub fn handle_connection(
 
     // optionally decrypt the module
     if decrypt {
-        module = ecies::decrypt(&shared_seal_key.secret.serialize(), &module)?;
+        module = ecies::decrypt(&shared_seal_key.secret.to_bytes(), &module)?;
     }
 
     // run wasm module
-    let output = crate::runtime::execute_module(module, &function, input, &shared_seal_key.secret)?;
+    let output = crate::runtime::execute_module(module, &function, input, shared_seal_key)?;
 
     // TODO: Response encodings
     //       - For http: send hash, proof, signature via headers, stream payload in response body.

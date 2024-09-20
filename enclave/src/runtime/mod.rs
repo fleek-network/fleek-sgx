@@ -1,12 +1,14 @@
+use std::sync::Arc;
+
 use anyhow::bail;
 use blake3_tree::blake3::tree::HashTree;
 use blake3_tree::blake3::Hash;
 use bytes::Bytes;
-use ecies::SecretKey;
 use libsecp256k1::Signature;
 use wasmi::{Config, Engine, Linker, Module, Store};
 
-use crate::runtime::host::{define, HostState};
+use crate::runtime::host::HostState;
+use crate::seal_key::SealKeyPair;
 
 mod host;
 
@@ -23,7 +25,7 @@ pub fn execute_module(
     module: impl AsRef<[u8]>,
     entry: &str,
     request: impl Into<Bytes>,
-    shared_secret_key: &SecretKey,
+    shared_secret_key: Arc<SealKeyPair>,
 ) -> anyhow::Result<WasmOutput> {
     let input = request.into();
     println!("input data: {input:?}");
@@ -43,7 +45,7 @@ pub fn execute_module(
 
     // Setup linker and define the host functions
     let mut linker = <Linker<HostState>>::new(&engine);
-    define(&mut store, &mut linker).expect("failed to define host functions");
+    host::define(&mut store, &mut linker).expect("failed to define host functions");
 
     // Initialize the module
     let module = Module::new(&engine, module.as_ref())?;
@@ -65,7 +67,7 @@ pub fn execute_module(
     // Sign output
     let (Signature { r, s }, v) = libsecp256k1::sign(
         &libsecp256k1::Message::parse(hash.as_bytes()),
-        shared_secret_key,
+        &shared_secret_key.secret.private_key().0,
     );
 
     // Encode signature, ethereum style

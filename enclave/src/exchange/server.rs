@@ -5,13 +5,13 @@ use std::sync::Arc;
 use anyhow::Context;
 use ra_tls::rustls::{ServerConfig, ServerConnection, StreamOwned};
 
-use super::codec::{Codec, FramedStream, Request, Response, PUBLIC_KEY_SIZE, SECRET_KEY_SIZE};
+use super::codec::{Codec, FramedStream, Request, Response, EXTENDED_KEY_SIZE};
 use crate::error::EnclaveError;
 
 pub fn start_mutual_tls_server(
     config: ServerConfig,
     port: u16,
-    shared_priv_key: [u8; SECRET_KEY_SIZE],
+    shared_priv_key: [u8; EXTENDED_KEY_SIZE],
 ) -> Result<(), EnclaveError> {
     let config = Arc::new(config);
 
@@ -54,7 +54,8 @@ pub fn start_mutual_tls_server(
 pub fn start_tls_server(
     config: ServerConfig,
     port: u16,
-    shared_pub_key: [u8; PUBLIC_KEY_SIZE],
+
+    shared_pub_key: [u8; EXTENDED_KEY_SIZE],
 ) -> Result<(), EnclaveError> {
     let config = Arc::new(config);
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))

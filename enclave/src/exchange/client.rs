@@ -34,7 +34,7 @@ pub fn get_secret_key_from_peers(
             }
 
             if let Ok(Codec::Response(Response::SecretKey(data))) = fstream.recv() {
-                if let Ok(secret_key) = SealKeyPair::from_secret_key_bytes(&data) {
+                if let Ok(secret_key) = SealKeyPair::from_private_bytes(data) {
                     return Ok(secret_key);
                 }
             }

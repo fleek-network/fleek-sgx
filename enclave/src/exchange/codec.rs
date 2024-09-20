@@ -4,8 +4,8 @@ use std::ops::{Deref, DerefMut};
 use anyhow::{anyhow, Result};
 use ra_tls::rustls::{ConnectionCommon, SideData, StreamOwned};
 
-pub const SECRET_KEY_SIZE: usize = 32;
-pub const PUBLIC_KEY_SIZE: usize = 33;
+// size of bip32's base58check extended public and private key
+pub const EXTENDED_KEY_SIZE: usize = 112;
 
 pub struct FramedStream<C: Sized, T: Read + Write + Sized> {
     inner: StreamOwned<C, T>,
@@ -57,8 +57,8 @@ pub enum Request {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
-    SecretKey([u8; SECRET_KEY_SIZE]),
-    PublicKey([u8; PUBLIC_KEY_SIZE]),
+    SecretKey([u8; EXTENDED_KEY_SIZE]),
+    PublicKey([u8; EXTENDED_KEY_SIZE]),
     KeyNotFound,
 }
 
@@ -91,12 +91,12 @@ impl Codec {
         match magic[0] {
             0x01 => Ok(Codec::Request(Request::GetKey)),
             0xFF => {
-                let mut key = [0; SECRET_KEY_SIZE];
+                let mut key = [0; EXTENDED_KEY_SIZE];
                 reader.read_exact(&mut key)?;
                 Ok(Codec::Response(Response::SecretKey(key)))
             },
             0xFE => {
-                let mut key = [0; PUBLIC_KEY_SIZE];
+                let mut key = [0; EXTENDED_KEY_SIZE];
                 reader.read_exact(&mut key)?;
                 Ok(Codec::Response(Response::PublicKey(key)))
             },
@@ -130,7 +130,7 @@ mod tests {
     fn test_response_key() {
         let mut cursor = Cursor::new(vec![0; 8]);
 
-        let key = [9; 32];
+        let key = [9; 112];
         let msg = Codec::Response(Response::SecretKey(key));
         msg.send(&mut cursor).unwrap();
 
