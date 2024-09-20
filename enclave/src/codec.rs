@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{anyhow, Result};
-use rustls::{SideData, StreamOwned};
+use ra_tls::{ConnectionCommon, SideData, StreamOwned};
 
 pub const SECRET_KEY_SIZE: usize = 32;
 pub const PUBLIC_KEY_SIZE: usize = 33;
@@ -13,7 +13,7 @@ pub struct FramedStream<C: Sized, T: Read + Write + Sized> {
 
 impl<C, T, S> FramedStream<C, T>
 where
-    C: DerefMut + Deref<Target = rustls::ConnectionCommon<S>>,
+    C: DerefMut + Deref<Target = ConnectionCommon<S>>,
     T: Read + Write,
     S: SideData,
 {
@@ -36,7 +36,7 @@ where
 
 impl<C, T, S> From<StreamOwned<C, T>> for FramedStream<C, T>
 where
-    C: DerefMut + Deref<Target = rustls::ConnectionCommon<S>>,
+    C: DerefMut + Deref<Target = ConnectionCommon<S>>,
     T: Read + Write,
     S: SideData,
 {

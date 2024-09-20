@@ -3,17 +3,17 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use bytes::BufMut;
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
-use ra_tls::codec::{Codec, Response};
-use ra_tls::server::handle_enclave_requests;
-use ra_tls::EncodeRsaPublicKey;
+use ra_tls::server::build_config;
+use ra_tls::{EncodeRsaPublicKey, ServerConfig, ServerConnection, StreamOwned};
 use ra_verify::types::collateral::SgxCollateral;
 use ra_verify::types::report::MREnclave;
 use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
 
+use crate::codec::{Codec, FramedStream, Request, Response, SECRET_KEY_SIZE};
 use crate::error::EnclaveError;
 use crate::req_res::{generate_for_report_data, save_sealed_key};
 use crate::seal_key::SealKeyPair;
@@ -90,7 +90,8 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let mut sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.serialize())?;
+                let mut sealed_shared_secret =
+                    seal_key.seal(&secret_key_pair.secret.serialize())?;
                 sealed_shared_secret.extend(&secret_key_pair.public.serialize_compressed());
                 save_sealed_key(sealed_shared_secret);
 
@@ -102,7 +103,8 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let mut sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
+                let mut sealed_shared_secret =
+                    seal_key.seal(&shared_secret_key.secret.serialize())?;
                 sealed_shared_secret.extend(&shared_secret_key.public.serialize_compressed());
                 save_sealed_key(sealed_shared_secret);
 
@@ -132,14 +134,10 @@ impl Enclave {
         let tls_secret_key = self.tls_secret_key.take().expect("TLS secret key not set");
         let tls_cert = self.tls_cert.take().expect("TLS cert not set");
         let our_mrenclave = self.report.mrenclave;
+        let server_config = build_config(tls_secret_key.clone(), tls_cert, Some(our_mrenclave))
+            .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
         std::thread::spawn(move || {
-            handle_enclave_requests(
-                our_mrenclave,
-                tls_secret_key.clone(),
-                tls_cert,
-                config::TLS_PORT,
-                shared_priv_key,
-            )
+            start_tls_server(server_config, config::TLS_PORT, shared_priv_key)
         });
 
         // run debug http verification data server
@@ -252,6 +250,49 @@ fn handle_connection(
     Ok(())
 }
 
+fn start_tls_server(
+    config: ServerConfig,
+    port: u16,
+    shared_priv_key: [u8; SECRET_KEY_SIZE],
+) -> Result<(), EnclaveError> {
+    let config = Arc::new(config);
+
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
+        .context("Failed to bind to TCP port")
+        .map_err(|_| EnclaveError::TlsServerError)?;
+
+    while let Ok((stream, _client_ip)) = listener.accept() {
+        let Ok(conn) = ServerConnection::new(config.clone()) else {
+            continue;
+        };
+
+        let mut tls = StreamOwned::new(conn, stream);
+        let mut buf = [0; 5];
+        if tls.read_exact(&mut buf).is_err() {
+            continue;
+        }
+
+        let mut fstream = FramedStream::from(tls);
+        let Ok(msg) = fstream.recv() else {
+            continue;
+        };
+
+        if let Codec::Request(Request::GetKey) = msg {
+            if fstream
+                .send(Codec::Response(Response::SecretKey(shared_priv_key)))
+                .is_err()
+            {
+                continue;
+            }
+        }
+
+        if fstream.close().is_err() {
+            continue;
+        }
+    }
+    Ok(())
+}
+
 fn get_seal_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
     let key = Keyrequest {
         keyname: Keyname::Seal as _,
@@ -296,17 +337,24 @@ fn get_secret_key_from_peers(
     // The runner should shuffle these peers before passing to enclave
 
     for peer in peers {
-        if let Ok((mut fstream, _)) = ra_tls::client::connect(
+        if let Ok(mut tls_stream) = ra_tls::client::connect(
             our_mrenclave,
             peer,
             crate::config::TLS_PORT,
             tls_private_key.to_vec(),
             tls_cert.to_vec(),
         ) {
-            if fstream
-                .send(Codec::Request(ra_tls::codec::Request::GetKey))
-                .is_err()
-            {
+            if tls_stream.write_all("hello".as_bytes()).is_err() {
+                continue;
+            }
+
+            if tls_stream.conn.negotiated_cipher_suite().is_none() {
+                continue;
+            }
+
+            let mut fstream = FramedStream::from(tls_stream);
+
+            if fstream.send(Codec::Request(Request::GetKey)).is_err() {
                 continue;
             }
 

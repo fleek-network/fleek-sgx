@@ -73,7 +73,6 @@ impl RemoteAttestationVerifier {
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        // TODO(matthias): remove the ones we don't support
         vec![
             SignatureScheme::ECDSA_NISTP256_SHA256,
             SignatureScheme::ECDSA_NISTP384_SHA384,
@@ -213,7 +212,6 @@ fn verify_with_remote_attestation(
 
 impl ClientCertVerifier for RemoteAttestationVerifier {
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
-        // TODO(matthias): do we need this?
         &[]
     }
 

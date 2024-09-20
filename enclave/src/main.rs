@@ -3,6 +3,7 @@ use ra_verify::types::collateral::SgxCollateral;
 use serde::{Deserialize, Serialize};
 
 mod blockstore;
+mod codec;
 mod enclave;
 mod error;
 mod http;

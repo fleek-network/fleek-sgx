@@ -1,14 +1,12 @@
-use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use ra_verify::types::report::MREnclave;
 use rustls::pki_types::{CertificateDer, IpAddr, PrivateKeyDer, PrivatePkcs1KeyDer, ServerName};
-use rustls::{ClientConnection, StreamOwned, SupportedCipherSuite};
+use rustls::{ClientConnection, StreamOwned};
 
 use crate::cert::{Certificate, PrivateKey};
-use crate::codec::FramedStream;
 use crate::verifier::RemoteAttestationVerifier;
 
 pub fn connect(
@@ -17,10 +15,7 @@ pub fn connect(
     server_port: u16,
     key: PrivateKey,
     cert: Certificate,
-) -> Result<(
-    FramedStream<ClientConnection, TcpStream>,
-    SupportedCipherSuite,
-)> {
+) -> Result<StreamOwned<ClientConnection, TcpStream>> {
     let private_key = PrivatePkcs1KeyDer::from(key);
     let private_key = PrivateKeyDer::from(private_key);
     let cert = CertificateDer::from(cert);
@@ -38,14 +33,6 @@ pub fn connect(
     );
     let conn = ClientConnection::new(Arc::new(config), server_name)?;
     let sock = TcpStream::connect(format!("{server_ip}:{server_port}"))?;
-    let mut tls = StreamOwned::new(conn, sock);
-
-    tls.write_all("hello".as_bytes())?;
-    let ciphersuite = tls
-        .conn
-        .negotiated_cipher_suite()
-        .context("Failed to negotiate cipher suite failed")?;
-
-    let fstream = FramedStream::from(tls);
-    Ok((fstream, ciphersuite))
+    let tls = StreamOwned::new(conn, sock);
+    Ok(tls)
 }

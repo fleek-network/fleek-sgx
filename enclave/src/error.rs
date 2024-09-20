@@ -7,6 +7,8 @@ pub enum EnclaveError {
     FailedToGenerateTlsKey,
     FailedToSeal,
     FailedToUnseal,
+    FailedToBuildTlsConfig,
+    TlsServerError,
     RunnerConnectionFailed,
     BadCollateral,
     InvalidArgs,
