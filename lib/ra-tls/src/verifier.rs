@@ -24,7 +24,7 @@ use rustls::{
     Error,
     SignatureScheme,
 };
-use sha2::Digest;
+use sha2::{Digest, Sha384};
 use x509_cert::certificate::{CertificateInner, Rfc5280};
 use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::SubjectAltName;
@@ -76,11 +76,9 @@ impl RemoteAttestationVerifier {
         // TODO(matthias): remove the ones we don't support
         vec![
             SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
             SignatureScheme::ECDSA_NISTP384_SHA384,
+            SignatureScheme::RSA_PKCS1_SHA256,
+            SignatureScheme::RSA_PKCS1_SHA384,
             SignatureScheme::RSA_PSS_SHA256,
             SignatureScheme::RSA_PSS_SHA384,
         ]
@@ -265,6 +263,7 @@ fn verify_signature(
         ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11");
     const ID_RSASSA_PSS: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.10");
     const ID_SHA_256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+    const ID_SHA_384: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
     const ECDSA_WITH_SHA_256: ObjectIdentifier =
         ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
     const ECDSA_WITH_SHA_384: ObjectIdentifier =
@@ -284,6 +283,8 @@ fn verify_signature(
 
             match params.hash.oid {
                 ID_SHA_256 => rsa::pss::VerifyingKey::<Sha256>::new(RsaPublicKey::try_from(spki)?)
+                    .verify(signed_data, &signature.try_into()?)?,
+                ID_SHA_384 => rsa::pss::VerifyingKey::<Sha384>::new(RsaPublicKey::try_from(spki)?)
                     .verify(signed_data, &signature.try_into()?)?,
                 _ => return Err(anyhow!("Unknown PSS hash algorithm {}", params.hash.oid)),
             }
