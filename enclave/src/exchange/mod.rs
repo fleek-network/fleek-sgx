@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use bip32::Prefix;
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
 use ra_tls::EncodeRsaPublicKey;
 use ra_verify::types::collateral::SgxCollateral;
@@ -16,10 +17,15 @@ mod client;
 mod codec;
 pub mod server;
 
+pub enum SharedSecretMethod {
+    InitialNode,
+    SealedOnDisk(Vec<u8>),
+    FetchFromPeers(Vec<String>),
+}
+
 pub struct EnclaveState {
     pub shared_seal_key: Arc<SealKeyPair>,
     pub report: Report,
-    // we will take these when we start the key sharing server
     pub tls_secret_key: Vec<u8>,
     pub tls_cert: Vec<u8>,
     pub quote: Vec<u8>,
@@ -68,8 +74,13 @@ pub fn init() -> Result<EnclaveState, EnclaveError> {
         SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
             println!("Recovering seal key from disk");
             // We already have previously recieved the secret key just need to unencrypt it
-            SealKeyPair::from_secret_key_slice(&seal_key.unseal(&encoded_secret_key)?)
-                .map_err(|_| EnclaveError::GeneratedBadSharedKey)?
+            SealKeyPair::from_private_bytes(
+                seal_key
+                    .unseal(&encoded_secret_key)?
+                    .try_into()
+                    .expect("invalid sealed data length"),
+            )
+            .map_err(|_| EnclaveError::GeneratedBadSharedKey)?
         },
         SharedSecretMethod::FetchFromPeers(peer_ips) => {
             println!("Fetching seal key from peers");
@@ -84,7 +95,7 @@ pub fn init() -> Result<EnclaveState, EnclaveError> {
 
             // Now that we have the secret key we should seal it and send it to the runner
             // to save to disk for next time we start up
-            let sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.serialize())?;
+            let sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.to_bytes())?;
             save_sealed_key(sealed_shared_secret);
 
             secret_key_pair
@@ -95,7 +106,7 @@ pub fn init() -> Result<EnclaveState, EnclaveError> {
 
             // Now that we have the secret key we should seal it and send it to the runner
             // to save to disk for next time we start up
-            let sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
+            let sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.to_bytes())?;
             save_sealed_key(sealed_shared_secret);
 
             shared_secret_key
@@ -103,8 +114,9 @@ pub fn init() -> Result<EnclaveState, EnclaveError> {
     });
 
     println!(
-        "Shared seal key: {}",
-        hex::encode(shared_seal_key.public.serialize_compressed())
+        "Shared seal key:\n- Extended public key: {}\n - Raw hex public key: {}",
+        shared_seal_key.public.to_string(Prefix::XPUB),
+        hex::encode(shared_seal_key.public.to_bytes())
     );
 
     Ok(EnclaveState {
@@ -134,7 +146,7 @@ fn get_seal_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
     .egetkey()
     .map_err(|_| EnclaveError::EGetKeyFailed)?;
 
-    Ok(SealKeyPair::from_seed_key(&key))
+    Ok(SealKeyPair::from_seed_key(key))
 }
 
 fn get_our_ip() -> Result<String, EnclaveError> {
@@ -194,11 +206,5 @@ fn initialize_shared_secret_key() -> Result<SealKeyPair, EnclaveError> {
     .egetkey()
     .map_err(|_| EnclaveError::EGetKeyFailed)?;
 
-    Ok(SealKeyPair::from_seed_key(&key))
-}
-
-pub enum SharedSecretMethod {
-    InitialNode,
-    SealedOnDisk(Vec<u8>),
-    FetchFromPeers(Vec<String>),
+    Ok(SealKeyPair::from_seed_key(key))
 }

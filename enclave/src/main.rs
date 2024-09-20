@@ -132,7 +132,7 @@ fn handle_connection(
 
     // optionally decrypt the module
     if decrypt {
-        module = ecies::decrypt(&shared_seal_key.secret.serialize(), &module)?;
+        module = ecies::decrypt(&shared_seal_key.secret.to_bytes(), &module)?;
     }
 
     // run wasm module
@@ -165,6 +165,7 @@ fn handle_connection(
 fn main() -> Result<(), EnclaveError> {
     println!("enclave started");
 
+    // Perform key exchange initialization sequence
     let EnclaveState {
         shared_seal_key,
         report,
@@ -174,9 +175,9 @@ fn main() -> Result<(), EnclaveError> {
         collateral,
     } = exchange::init()?;
 
-    // run key sharing server
+    // Spawn thread to run key sharing server
     let our_mrenclave = report.mrenclave;
-    let shared_priv_key = shared_seal_key.secret.serialize();
+    let shared_priv_key = shared_seal_key.to_private_bytes();
     std::thread::spawn(move || {
         handle_enclave_requests(
             our_mrenclave,
@@ -187,10 +188,10 @@ fn main() -> Result<(), EnclaveError> {
         )
     });
 
-    // run debug http verification data server
-    let shared_pub_key = shared_seal_key.public;
+    // Spawn thread to run debug http verification data server
+    let shared_pub_key = shared_seal_key.to_public_bytes();
     std::thread::spawn(move || {
-        crate::http::start_server(config::HTTP_PORT, quote, collateral, shared_pub_key);
+        crate::http::start_server(config::HTTP_PORT, quote, collateral, &shared_pub_key);
     });
 
     // bind to userspace address for incoming requests from handshake
@@ -198,7 +199,7 @@ fn main() -> Result<(), EnclaveError> {
         .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
     let semaphore = Arc::new(Semaphore::new(config::MAX_CONCURRENT_WASM_THREADS));
 
-    // Setup a worker thread to spawn connection threads
+    // Spawn a worker thread to process new connections and spawn threads for them
     let (tx, rx) = std::sync::mpsc::sync_channel(2048);
     let shared_seal_key = shared_seal_key.clone();
     let semaphore = semaphore.clone();
@@ -224,7 +225,8 @@ fn main() -> Result<(), EnclaveError> {
         }
     });
 
-    // Handle incoming handshake connections
+    // Handle incoming handshake connections on the main thread,
+    // and send them to the worker thread.
     loop {
         let (conn, _) = listener
             .accept()

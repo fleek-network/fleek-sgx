@@ -2,7 +2,6 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 
 use anyhow::{anyhow, Context, Result};
-use ecies::PublicKey;
 
 use crate::SgxCollateral;
 
@@ -10,19 +9,18 @@ pub fn start_server(
     port: u16,
     quote: Vec<u8>,
     collateral: SgxCollateral,
-    shared_pub_key: PublicKey,
+    shared_pub_key: &[u8; 112],
 ) {
     let listener = TcpListener::bind(format!("0.0.0.0:{port}")).expect("Failed to bind to port");
     let collat_bytes = serde_json::to_string(&collateral)
         .expect("Failed to serialize collateral")
         .into_bytes();
-    let pub_key_bytes = hex::encode(shared_pub_key.serialize_compressed()).into_bytes();
 
     for stream in listener.incoming() {
         let Ok(stream) = stream else {
             continue;
         };
-        let _ = handle_connection(stream, &quote, &collat_bytes, &pub_key_bytes);
+        let _ = handle_connection(stream, &quote, &collat_bytes, shared_pub_key);
     }
 }
 
