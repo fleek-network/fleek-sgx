@@ -90,7 +90,8 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.serialize())?;
+                let mut sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.serialize())?;
+                sealed_shared_secret.extend(&secret_key_pair.public.serialize_compressed());
                 save_sealed_key(sealed_shared_secret);
 
                 secret_key_pair
@@ -101,7 +102,8 @@ impl Enclave {
 
                 // Now that we have the secret key we should seal it and send it to the runner
                 // to save to disk for next time we start up
-                let sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
+                let mut sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.serialize())?;
+                sealed_shared_secret.extend(&shared_secret_key.public.serialize_compressed());
                 save_sealed_key(sealed_shared_secret);
 
                 shared_secret_key
