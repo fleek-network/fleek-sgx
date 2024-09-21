@@ -1,12 +1,10 @@
 use error::EnclaveError;
-use ra_verify::types::collateral::SgxCollateral;
 use serde::{Deserialize, Serialize};
 
 mod blockstore;
 mod codec;
 mod enclave;
 mod error;
-mod http;
 mod req_res;
 mod runtime;
 mod seal_key;
@@ -17,8 +15,8 @@ pub(crate) mod config {
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
     pub const MAX_CONCURRENT_WASM_THREADS: usize = 128;
     pub const TLS_KEY_SIZE: usize = 2048;
-    pub const TLS_PORT: u16 = 55855;
-    pub const HTTP_PORT: u16 = 8011;
+    pub const MTLS_PORT: u16 = 55855;
+    pub const TLS_PORT: u16 = 55856;
 }
 
 #[derive(Serialize, Deserialize)]

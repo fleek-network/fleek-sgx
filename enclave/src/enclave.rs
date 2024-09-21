@@ -8,12 +8,11 @@ use bytes::BufMut;
 use ra_tls::cert::{generate_cert, generate_key, AttestationPayload};
 use ra_tls::server::build_config;
 use ra_tls::{EncodeRsaPublicKey, ServerConfig, ServerConnection, StreamOwned};
-use ra_verify::types::collateral::SgxCollateral;
 use ra_verify::types::report::MREnclave;
 use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
 
-use crate::codec::{Codec, FramedStream, Request, Response, SECRET_KEY_SIZE};
+use crate::codec::{Codec, FramedStream, Request, Response, PUBLIC_KEY_SIZE, SECRET_KEY_SIZE};
 use crate::error::EnclaveError;
 use crate::req_res::{generate_for_report_data, save_sealed_key};
 use crate::seal_key::SealKeyPair;
@@ -26,8 +25,6 @@ pub struct Enclave {
     // we will take these when we start the key sharing server
     pub tls_secret_key: Option<Vec<u8>>,
     pub tls_cert: Option<Vec<u8>>,
-    pub quote: Option<Vec<u8>>,
-    pub collateral: Option<SgxCollateral>,
 }
 
 impl Enclave {
@@ -123,8 +120,6 @@ impl Enclave {
             semaphore: Arc::new(Semaphore::new(config::MAX_CONCURRENT_WASM_THREADS)),
             tls_secret_key: Some(tls_secret_key),
             tls_cert: Some(tls_cert),
-            quote: Some(quote),
-            collateral: Some(collateral),
         })
     }
 
@@ -134,18 +129,28 @@ impl Enclave {
         let tls_secret_key = self.tls_secret_key.take().expect("TLS secret key not set");
         let tls_cert = self.tls_cert.take().expect("TLS cert not set");
         let our_mrenclave = self.report.mrenclave;
-        let server_config = build_config(tls_secret_key.clone(), tls_cert, Some(our_mrenclave))
-            .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
+
+        // Start mutual TLS server for communication with the enclaves on the other nodes
+        let server_config = build_config(
+            tls_secret_key.clone(),
+            tls_cert.clone(),
+            Some(our_mrenclave),
+        )
+        .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
         std::thread::spawn(move || {
-            start_tls_server(server_config, config::TLS_PORT, shared_priv_key)
+            start_mutual_tls_server(server_config, config::MTLS_PORT, shared_priv_key)
         });
 
-        // run debug http verification data server
-        let quote = self.quote.take().unwrap();
-        let collateral = self.collateral.take().unwrap();
+        // Start TLS server for client remote attetation
         let shared_pub_key = self.shared_seal_key.public;
+        let server_config = build_config(tls_secret_key.clone(), tls_cert, None)
+            .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
         std::thread::spawn(move || {
-            crate::http::start_server(config::HTTP_PORT, quote, collateral, shared_pub_key);
+            start_tls_server(
+                server_config,
+                config::TLS_PORT,
+                shared_pub_key.serialize_compressed(),
+            )
         });
 
         // bind to userspace address for incoming requests from handshake
@@ -250,7 +255,7 @@ fn handle_connection(
     Ok(())
 }
 
-fn start_tls_server(
+fn start_mutual_tls_server(
     config: ServerConfig,
     port: u16,
     shared_priv_key: [u8; SECRET_KEY_SIZE],
@@ -280,6 +285,49 @@ fn start_tls_server(
         if let Codec::Request(Request::GetKey) = msg {
             if fstream
                 .send(Codec::Response(Response::SecretKey(shared_priv_key)))
+                .is_err()
+            {
+                continue;
+            }
+        }
+
+        if fstream.close().is_err() {
+            continue;
+        }
+    }
+    Ok(())
+}
+
+fn start_tls_server(
+    config: ServerConfig,
+    port: u16,
+    shared_pub_key: [u8; PUBLIC_KEY_SIZE],
+) -> Result<(), EnclaveError> {
+    let config = Arc::new(config);
+
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
+        .context("Failed to bind to TCP port")
+        .map_err(|_| EnclaveError::TlsServerError)?;
+
+    while let Ok((stream, _client_ip)) = listener.accept() {
+        let Ok(conn) = ServerConnection::new(config.clone()) else {
+            continue;
+        };
+
+        let mut tls = StreamOwned::new(conn, stream);
+        let mut buf = [0; 5];
+        if tls.read_exact(&mut buf).is_err() {
+            continue;
+        }
+
+        let mut fstream = FramedStream::from(tls);
+        let Ok(msg) = fstream.recv() else {
+            continue;
+        };
+
+        if let Codec::Request(Request::GetKey) = msg {
+            if fstream
+                .send(Codec::Response(Response::PublicKey(shared_pub_key)))
                 .is_err()
             {
                 continue;
