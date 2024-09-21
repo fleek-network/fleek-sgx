@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 # WASM Runtime
 wasmi = "=0.36.1"
-quick_cache = "=0.6.9"
 
 # Error stuffs
 anyhow = "=1.0.89"

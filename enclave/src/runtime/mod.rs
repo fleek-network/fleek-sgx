@@ -42,7 +42,10 @@ pub fn execute_module(
             maximum_recursion_depth: 65535,
         });
     let engine = Engine::new(&config);
-    let mut store = Store::new(&engine, HostState::new(input));
+    let mut store = Store::new(
+        &engine,
+        HostState::new(shared_secret_key.clone(), hash, input),
+    );
 
     // Setup linker and define the host functions
     let mut linker = <Linker<HostState>>::new(&engine);

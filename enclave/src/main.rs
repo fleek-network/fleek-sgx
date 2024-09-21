@@ -128,7 +128,7 @@ fn handle_connection(
     } = serde_json::from_slice(&payload)?;
 
     // fetch content from blockstore
-    let mut module = blockstore::get_verified_content(&hash)?;
+    let (hash, mut module) = blockstore::get_verified_content(&hash)?;
 
     // optionally decrypt the module
     if decrypt {
@@ -136,7 +136,8 @@ fn handle_connection(
     }
 
     // run wasm module
-    let output = crate::runtime::execute_module(module, &function, input, &shared_seal_key.secret)?;
+    let output =
+        crate::runtime::execute_module(hash, module, &function, input, shared_seal_key.clone())?;
 
     // TODO: Response encodings
     //       - For http: send hash, proof, signature via headers, stream payload in response body.
