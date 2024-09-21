@@ -11,7 +11,7 @@ use crate::config;
 const LEADING_BIT: u32 = 1 << 31;
 
 /// Get some verified content from the userland.
-pub fn get_verified_content(hash: &str) -> anyhow::Result<Vec<u8>> {
+pub fn get_verified_content(hash: &str) -> anyhow::Result<([u8; 32], Vec<u8>)> {
     let raw = hex::decode(hash)?;
     if raw.len() != 32 {
         bail!("invalid blake3 hash length");
@@ -62,5 +62,5 @@ pub fn get_verified_content(hash: &str) -> anyhow::Result<Vec<u8>> {
 
     println!("enclave received verified content");
 
-    Ok(content)
+    Ok((raw, content))
 }

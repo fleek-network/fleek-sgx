@@ -85,12 +85,13 @@ pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), E
 }
 
 /// Handle an incoming handshake client connection
-pub fn handle_connection(
+fn handle_connection(
     shared_seal_key: Arc<SealKeyPair>,
     conn: &mut (impl Read + Write),
 ) -> anyhow::Result<()> {
     println!("handling connection in enclave");
-    // read length delimiter
+
+    // Read length delimiter
     let mut buf = [0; 4];
     conn.read_exact(&mut buf)?;
     let len = u32::from_be_bytes(buf) as usize;
@@ -99,11 +100,11 @@ pub fn handle_connection(
         bail!("input too large");
     }
 
-    // read payload
+    // Read payload
     let mut payload = vec![0; len];
     conn.read_exact(&mut payload)?;
 
-    // parse payload
+    // Parse payload
     let ServiceRequest {
         hash,
         function,
@@ -111,16 +112,18 @@ pub fn handle_connection(
         decrypt,
     } = serde_json::from_slice(&payload)?;
 
-    // fetch content from blockstore
-    let mut module = blockstore::get_verified_content(&hash)?;
+    // Fetch content from blockstore
+    let (hash, mut module) = blockstore::get_verified_content(&hash)?;
 
-    // optionally decrypt the module
+    // Optionally decrypt the module
     if decrypt {
         module = ecies::decrypt(&shared_seal_key.secret.to_bytes(), &module)?;
     }
 
-    // run wasm module
-    let output = crate::runtime::execute_module(module, &function, input, shared_seal_key)?;
+    // Run wasm module
+    // TODO: Should we rehash encrypted content, since the encryption hash is
+    // non-determanistic, and thus permissions might differ even though module is the same?
+    let output = crate::runtime::execute_module(hash, module, &function, input, shared_seal_key)?;
 
     // TODO: Response encodings
     //       - For http: send hash, proof, signature via headers, stream payload in response body.
@@ -138,6 +141,7 @@ pub fn handle_connection(
     })?;
     header.put_slice(b"\r\n");
 
+    // Write to output
     let len = (header.len() + output.payload.len()) as u32;
     conn.write_all(&len.to_be_bytes())?;
     conn.write_all(&header)?;
