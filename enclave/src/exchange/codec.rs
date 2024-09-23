@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{anyhow, Result};
@@ -64,6 +64,7 @@ pub enum Response {
 
 impl Codec {
     pub fn send<W: Write>(&self, writer: &mut W) -> Result<()> {
+        let mut writer = BufWriter::new(writer);
         match self {
             Codec::Request(req) => match req {
                 Request::GetKey => writer.write_all(&[0x01])?,
@@ -85,7 +86,7 @@ impl Codec {
     }
 
     pub fn recv<R: Read>(reader: &mut R) -> Result<Self> {
-        // TODO(matthias): wrap into BufReader?
+        let mut reader = BufReader::new(reader);
         let mut magic = [0; 1];
         reader.read_exact(&mut magic)?;
         match magic[0] {
