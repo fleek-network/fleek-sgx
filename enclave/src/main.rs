@@ -1,4 +1,4 @@
-use ra_tls::server::build_config;
+use ra_tls::server::{build_config_mtls, build_config_tls};
 
 use crate::error::EnclaveError;
 use crate::exchange::Enclave;
@@ -34,21 +34,17 @@ fn main() -> Result<(), EnclaveError> {
 
     // Start mutual TLS server for communication with the enclaves on the other nodes
     let our_mrenclave = report.mrenclave;
-    let server_config = build_config(
-        tls_secret_key.clone(),
-        tls_cert.clone(),
-        Some(our_mrenclave),
-    )
-    .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
+    let server_config = build_config_mtls(tls_secret_key.clone(), tls_cert.clone(), our_mrenclave)
+        .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     let shared_priv_key = shared_seal_key.to_private_bytes();
 
     std::thread::spawn(move || {
-        exchange::server::start_mutual_tls_server(server_config, config::MTLS_PORT, shared_priv_key)
+        exchange::server::start_mtls_server(server_config, config::MTLS_PORT, shared_priv_key)
     });
 
     // Start TLS server for client remote attetation
     let shared_pub_key = shared_seal_key.to_public_bytes();
-    let server_config = build_config(tls_secret_key.clone(), tls_cert, None)
+    let server_config = build_config_tls(tls_secret_key.clone(), tls_cert)
         .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     std::thread::spawn(move || {
         exchange::server::start_tls_server(server_config, config::TLS_PORT, shared_pub_key)

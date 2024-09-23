@@ -14,7 +14,7 @@ pub fn get_secret_key_from_peers(
 ) -> Result<SealKeyPair, EnclaveError> {
     // The runner should shuffle these peers before passing to enclave
     for peer in peers {
-        if let Ok(mut stream) = ra_tls::client::connect(
+        if let Ok(mut stream) = ra_tls::client::connect_mtls(
             our_mrenclave,
             peer,
             crate::config::TLS_PORT,

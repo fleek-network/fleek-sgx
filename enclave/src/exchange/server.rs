@@ -8,7 +8,7 @@ use ra_tls::rustls::{ServerConfig, ServerConnection, StreamOwned};
 use super::codec::{Codec, FramedStream, Request, Response, EXTENDED_KEY_SIZE};
 use crate::error::EnclaveError;
 
-pub fn start_mutual_tls_server(
+pub fn start_mtls_server(
     config: ServerConfig,
     port: u16,
     shared_priv_key: [u8; EXTENDED_KEY_SIZE],
