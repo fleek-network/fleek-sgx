@@ -94,7 +94,8 @@ pub fn init() -> Result<Enclave, EnclaveError> {
 
             // Now that we have the secret key we should seal it and send it to the runner
             // to save to disk for next time we start up
-            let sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.to_bytes())?;
+            let mut sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.to_bytes())?;
+            sealed_shared_secret.extend(&secret_key_pair.public.to_bytes());
             save_sealed_key(sealed_shared_secret);
 
             secret_key_pair
@@ -105,7 +106,8 @@ pub fn init() -> Result<Enclave, EnclaveError> {
 
             // Now that we have the secret key we should seal it and send it to the runner
             // to save to disk for next time we start up
-            let sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.to_bytes())?;
+            let mut sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.to_bytes())?;
+            sealed_shared_secret.extend(&shared_secret_key.public.to_bytes());
             save_sealed_key(sealed_shared_secret);
 
             shared_secret_key
