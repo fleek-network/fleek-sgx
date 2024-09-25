@@ -7,24 +7,6 @@ use bytes::{Bytes, BytesMut};
 
 use crate::seal_key::SealKeyPair;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u32)]
-pub enum DerivedKeyScope {
-    Global = 0,
-    Wasm = 1,
-}
-
-impl TryFrom<u32> for DerivedKeyScope {
-    type Error = ();
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(DerivedKeyScope::Global),
-            1 => Ok(DerivedKeyScope::Wasm),
-            _ => Err(()),
-        }
-    }
-}
-
 /// Runtime host state
 pub struct HostState {
     shared: Arc<SealKeyPair>,
@@ -49,12 +31,27 @@ impl HostState {
         (self.hasher.finalize(), self.output.freeze())
     }
 
-    /// Derive a non-hardened bip32 key pair from the root shared key.
-    /// - For the global key scope, no additional derivations are done other than the given path.
-    ///   Any wasm module can access this keyspace, though *only* for unsealing
-    /// - For the wasm key scope, the wasm hash is included when deriving the key. Only the calling
-    ///   wasm module can access these keys
-    pub fn derive_wasm_key(&mut self, path: [u8; 64]) -> anyhow::Result<Rc<SealKeyPair>> {
+    /// Derive a wasm module specific, non-hardened, bip32 key pair from the shared extended key.
+    ///
+    /// Rough algorithm is as follows:
+    ///
+    /// ```ignore
+    /// // start with shared key
+    /// let derived_key = shared_key;
+    ///
+    /// // wasm module scope
+    /// for hash_chunk_u16 in wasm_hash.chunks(2) {
+    ///   derived_key = derived_key.derive_child(hash_chunk_u16 as u32, false);
+    /// }
+    ///
+    /// // user provided path scope (<=256, even length)
+    /// for path_chunk_u16 in path.chunks(2) {
+    ///   derived_key = derived_key.derive_child(path_chunk_u16 as u32, false);
+    /// }
+    ///
+    /// Ok(derived_key)
+    /// ```
+    pub fn derive_wasm_key(&mut self, path: &[u8]) -> anyhow::Result<Rc<SealKeyPair>> {
         // Derive child for scope
         let mut secret = self
             .shared
@@ -64,13 +61,13 @@ impl HostState {
         // Derive child for wasm hash (16 iterations)
         for n in self
             .hash
-            .chunks(2)
+            .chunks_exact(2)
             .map(|v| u16::from_be_bytes(v.try_into().unwrap()).into())
         {
             secret = secret.derive_child(ChildNumber::new(n, false).unwrap())?;
         }
 
-        // Derive user path as 2 byte chunks (32 iterations)
+        // Derive user path as chunks of unsized 16 bit integers
         for n in path
             .chunks(2)
             .map(|v| u16::from_be_bytes(v.try_into().unwrap()).into())
@@ -131,14 +128,16 @@ pub mod fn0 {
     enum HostError {
         /// Specified pointers were out of bounds
         OutOfBounds = -1,
+        /// Invalid key derivation path
+        KeyDerivationInvalidPath = -2,
         /// Key derivation error
-        KeyDerivation = -2,
-        /// Invalid global scope permission header
-        InvalidGlobalHeader = -4,
+        KeyDerivation = -3,
+        /// Invalid permission header for shared key
+        UnsealInvalidPermissionHeader = -4,
         /// Current wasm is not approved to access global content
         UnsealPermissionDenied = -5,
         /// Sealed data could not be decrypted
-        InvalidSealedData = -6,
+        UnsealFailed = -6,
         /// Unexpected error
         #[allow(unused)]
         Unexpected = -99,
@@ -221,14 +220,18 @@ pub mod fn0 {
         0
     }
 
-    /// Unseal a section of memory in-place using the global shared key.
+    /// Unseal a section of memory in-place using the shared extended key.
     ///
     /// # Handling permissions
     ///
     /// Unencrypted content must include a header with a list of approved wasm modules.
-    /// Header must include a prefix b"FLEEK_ENCLAVE_APPROVED_WASM", followed by a u8 number
-    /// of hashes to read, and finally the approved 32 byte wasm hashes. The content itself
-    /// is then everything after the header.
+    ///
+    /// This header is made up of;
+    /// * a prefix b"FLEEK_ENCLAVE_APPROVED_WASM"
+    /// * a u8 number of hashes to read
+    /// * the approved 32 byte wasm hashes.
+    ///
+    /// The content itself is then everything after the header (`prefix + 1 + len * 32`).
     ///
     /// # Parameters
     ///
@@ -237,7 +240,7 @@ pub mod fn0 {
     ///
     /// # Returns
     ///
-    /// * `>0`: length of decrypted content
+    /// * `>0`: length of decrypted content written to `cipher_ptr`
     /// * `<0`: Host error
     pub fn shared_key_unseal(mut ctx: Ctx, cipher_ptr: u32, cipher_len: u32) -> i32 {
         let cipher_ptr = cipher_ptr as usize;
@@ -258,7 +261,7 @@ pub mod fn0 {
 
         // Unseal the content using the global key
         let Ok(mut plaintext) = state.shared.unseal(ciphertext).map(Bytes::from) else {
-            return HostError::InvalidSealedData as i32;
+            return HostError::UnsealFailed as i32;
         };
 
         // Parse out the permissions header from the plaintext, and ensure the current wasm
@@ -267,25 +270,25 @@ pub mod fn0 {
         // Ensure we have enough bytes for the prefix, at least 1 approved hash, and at least
         // 1 byte of raw content.
         if plaintext.len() < PREFIX.len() + 1 + 32 + 1 {
-            return HostError::InvalidGlobalHeader as i32;
+            return HostError::UnsealInvalidPermissionHeader as i32;
         }
         if plaintext.split_to(PREFIX.len()) != PREFIX {
-            return HostError::InvalidGlobalHeader as i32;
+            return HostError::UnsealInvalidPermissionHeader as i32;
         }
 
         // Ensure decrypted content has the header hashes and at least 1 byte of raw content
         let num_hashes = plaintext.get_u8() as usize;
         if num_hashes == 0 {
-            return HostError::InvalidGlobalHeader as i32;
+            return HostError::UnsealInvalidPermissionHeader as i32;
         }
         if plaintext.len() < num_hashes * 32 + 1 {
-            return HostError::InvalidGlobalHeader as i32;
+            return HostError::UnsealInvalidPermissionHeader as i32;
         }
 
         // Split off and parse the approved hashes
         let hashes = plaintext
             .split_to(num_hashes * 32)
-            .chunks(32)
+            .chunks_exact(32)
             .map(|h| h.try_into().unwrap())
             .collect::<Vec<[u8; 32]>>();
 
@@ -302,17 +305,38 @@ pub mod fn0 {
         plaintext.len() as i32
     }
 
+    /// Derive a wasm specific key from the shared key, with a given path up to `[u16; 128]`, and
+    /// unseal encrypted data with it.
+    ///
+    /// # Parameters
+    ///
+    /// * `path_ptr`: Memory offset of key derivation path
+    /// * `path_len`: Length of path, must be an even number <= 256
+    /// * `cipher_ptr`: memory offset to read encrypted content from
+    /// * `cipher_len`: length of encrypted content
+    ///
+    /// # Returns
+    ///
+    /// * `>0`: length of decrypted content written to `cipher_ptr`
+    /// * `<0`: Host error
     pub fn derived_key_unseal(
         mut ctx: Ctx,
         path_ptr: u32,
+        path_len: u32,
         cipher_ptr: u32,
         cipher_len: u32,
     ) -> i32 {
         let path_ptr = path_ptr as usize;
+        let path_len = path_len as usize;
         let cipher_ptr = cipher_ptr as usize;
         let cipher_len = cipher_len as usize;
 
-        // If we cant fit the length inside an i32, return an error
+        // Error if path length is greater than 256, or odd
+        if path_len > 256 || path_len % 2 != 0 {
+            return HostError::KeyDerivationInvalidPath as i32;
+        }
+
+        // If we can't fit the length inside an i32, return an error
         if cipher_len > i32::MAX as usize {
             return HostError::OutOfBounds as i32;
         }
@@ -321,10 +345,10 @@ pub mod fn0 {
         let (memory, state) = memory.data_and_store_mut(&mut ctx);
 
         // Derive the key
-        let Some(path) = memory.get(path_ptr..path_ptr + 64) else {
+        let Some(path) = memory.get(path_ptr..path_ptr + path_len) else {
             return HostError::OutOfBounds as i32;
         };
-        let Ok(key) = state.derive_wasm_key(path.try_into().unwrap()) else {
+        let Ok(key) = state.derive_wasm_key(path) else {
             return HostError::KeyDerivation as i32;
         };
 
@@ -335,7 +359,7 @@ pub mod fn0 {
 
         // Unseal the content using the derived wasm key
         let Ok(plaintext) = key.unseal(ciphertext) else {
-            return HostError::InvalidSealedData as i32;
+            return HostError::UnsealFailed as i32;
         };
 
         // Write over the encrypted content. Decrypted content will always be shorter than encrypted
@@ -346,23 +370,39 @@ pub mod fn0 {
         plaintext.len() as i32
     }
 
-    /// Hash and sign user data with a derived wasm module key.
-    /// Global scope is not allowed, and thus scope is not an argument.
+    /// Derive a wasm specific key from the shared key, with a given path up to `[u16; 128]`, and
+    /// sign the sha256 hash of some data with it.
+    ///
+    /// # Parameters
+    ///
+    /// * `path_ptr`: Memory offset of key derivation path
+    /// * `path_len`: Length of path, must be an even number <= 256
+    /// * `data_ptr`: Memory offset of data to hash and sign
+    /// * `data_len`: Length of data to hash and sign
+    /// * `signature_buf_ptr`: Memory offset to write 65 byte signature to
+    ///
+    /// # Returns
+    ///
+    /// * ` 0`: Success
+    /// * `<0`: Host error
     pub fn derived_key_sign(
         mut ctx: Ctx,
-        // 64 byte key derivation path
         path_ptr: u32,
-        // Memory offset of data to hash and sign
+        path_len: u32,
         data_ptr: u32,
-        // Length of data to hash and sign
         data_len: u32,
-        // Memory offset to write 65 byte signature to
         signature_buf_ptr: u32,
     ) -> i32 {
         let path_ptr = path_ptr as usize;
+        let path_len = path_len as usize;
         let data_ptr = data_ptr as usize;
         let data_len = data_len as usize;
         let signature_buf_ptr = signature_buf_ptr as usize;
+
+        // Error if path length is greater than 256, or odd
+        if path_len > 256 || path_len % 2 != 0 {
+            return HostError::KeyDerivationInvalidPath as i32;
+        }
 
         // SAFETY: We ensure this exists before running anything
         let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
@@ -375,10 +415,10 @@ pub mod fn0 {
         let message = sha2::Sha256::digest(data).into();
 
         // Derive the client key
-        let Some(path) = memory.get(path_ptr..path_ptr + 64) else {
+        let Some(path) = memory.get(path_ptr..path_ptr + path_len) else {
             return HostError::OutOfBounds as i32;
         };
-        let Ok(key) = state.derive_wasm_key(path.try_into().unwrap()) else {
+        let Ok(key) = state.derive_wasm_key(path) else {
             return HostError::KeyDerivation as i32;
         };
 
