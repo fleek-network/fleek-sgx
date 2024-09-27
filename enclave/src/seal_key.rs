@@ -23,25 +23,19 @@ impl SealKeyPair {
     }
 
     /// Serialize extended secret key into base58 bytes
-    pub fn to_private_bytes(&self) -> [u8; 112] {
-        self.secret
-            .to_string(Prefix::XPRV)
-            .as_bytes()
-            .try_into()
-            .unwrap()
+    pub fn to_private_bytes(&self) -> [u8; 111] {
+        let xprv = self.secret.to_string(Prefix::XPRV);
+        xprv.as_bytes().try_into().unwrap()
     }
 
     /// Serialize extended public key into base58 bytes
-    pub fn to_public_bytes(&self) -> [u8; 112] {
-        self.public
-            .to_string(Prefix::XPUB)
-            .as_bytes()
-            .try_into()
-            .unwrap()
+    pub fn to_public_bytes(&self) -> [u8; 111] {
+        let xpub = self.public.to_string(Prefix::XPUB);
+        xpub.as_bytes().try_into().unwrap()
     }
 
     /// Deserialize extended private fro base58 bytes
-    pub fn from_private_bytes(bytes: [u8; 112]) -> anyhow::Result<Self> {
+    pub fn from_private_bytes(bytes: [u8; 111]) -> anyhow::Result<Self> {
         let string = String::from_utf8(bytes.into())?;
         let ext = ExtendedKey::from_str(&string)?;
         let secret = ExtendedPrivateKey::try_from(ext)?;

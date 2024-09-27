@@ -76,7 +76,7 @@ pub fn init() -> Result<Enclave, EnclaveError> {
             // We already have previously recieved the secret key just need to unencrypt it
             SealKeyPair::from_private_bytes(
                 seal_key
-                    .unseal(&encoded_secret_key)?
+                    .unseal(&encoded_secret_key[..208])?
                     .try_into()
                     .expect("invalid sealed data length"),
             )
@@ -85,6 +85,7 @@ pub fn init() -> Result<Enclave, EnclaveError> {
         // We need to get the secret key from our peers
         SharedSecretMethod::FetchFromPeers(peer_ips) => {
             println!("Fetching seal key from peers");
+
             let secret_key_pair = client::get_secret_key_from_peers(
                 peer_ips,
                 &tls_secret_key,
@@ -94,20 +95,21 @@ pub fn init() -> Result<Enclave, EnclaveError> {
 
             // Now that we have the secret key we should seal it and send it to the runner
             // to save to disk for next time we start up
-            let mut sealed_shared_secret = seal_key.seal(&secret_key_pair.secret.to_bytes())?;
-            sealed_shared_secret.extend(&secret_key_pair.public.to_bytes());
+            let mut sealed_shared_secret = seal_key.seal(&secret_key_pair.to_private_bytes())?;
+            sealed_shared_secret.extend(&secret_key_pair.to_public_bytes());
             save_sealed_key(sealed_shared_secret);
 
             secret_key_pair
         },
         SharedSecretMethod::InitialNode => {
             println!("Initializing seal key");
+
             let shared_secret_key = initialize_shared_secret_key()?;
 
             // Now that we have the secret key we should seal it and send it to the runner
             // to save to disk for next time we start up
-            let mut sealed_shared_secret = seal_key.seal(&shared_secret_key.secret.to_bytes())?;
-            sealed_shared_secret.extend(&shared_secret_key.public.to_bytes());
+            let mut sealed_shared_secret = seal_key.seal(&shared_secret_key.to_private_bytes())?;
+            sealed_shared_secret.extend(&shared_secret_key.to_public_bytes());
             save_sealed_key(sealed_shared_secret);
 
             shared_secret_key

@@ -37,9 +37,9 @@ fn main() -> Result<(), EnclaveError> {
     let server_config = build_config_mtls(tls_secret_key.clone(), tls_cert.clone(), our_mrenclave)
         .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     let shared_priv_key = shared_seal_key.to_private_bytes();
-
     std::thread::spawn(move || {
         exchange::server::start_mtls_server(server_config, config::MTLS_PORT, shared_priv_key)
+            .unwrap()
     });
 
     // Start TLS server for client remote attetation
@@ -47,7 +47,7 @@ fn main() -> Result<(), EnclaveError> {
     let server_config = build_config_tls(tls_secret_key.clone(), tls_cert)
         .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     std::thread::spawn(move || {
-        exchange::server::start_tls_server(server_config, config::TLS_PORT, shared_pub_key)
+        exchange::server::start_tls_server(server_config, config::TLS_PORT, shared_pub_key).unwrap()
     });
 
     // Start handshake server for incoming client wasm requests

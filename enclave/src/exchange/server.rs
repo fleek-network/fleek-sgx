@@ -5,16 +5,15 @@ use std::sync::Arc;
 use anyhow::Context;
 use ra_tls::rustls::{ServerConfig, ServerConnection, StreamOwned};
 
-use super::codec::{Codec, FramedStream, Request, Response, EXTENDED_KEY_SIZE};
+use super::codec::{Codec, FramedStream, Request, Response, XPRV_KEY_SIZE, XPUB_KEY_SIZE};
 use crate::error::EnclaveError;
 
 pub fn start_mtls_server(
     config: ServerConfig,
     port: u16,
-    shared_priv_key: [u8; EXTENDED_KEY_SIZE],
+    shared_priv_key: [u8; XPRV_KEY_SIZE],
 ) -> Result<(), EnclaveError> {
     let config = Arc::new(config);
-
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
         .context("Failed to bind to TCP port")
         .map_err(|_| EnclaveError::TlsServerError)?;
@@ -54,13 +53,13 @@ pub fn start_mtls_server(
 pub fn start_tls_server(
     config: ServerConfig,
     port: u16,
-
-    shared_pub_key: [u8; EXTENDED_KEY_SIZE],
+    shared_pub_key: [u8; XPUB_KEY_SIZE],
 ) -> Result<(), EnclaveError> {
     let config = Arc::new(config);
     let listener = TcpListener::bind(format!("0.0.0.0:{}", port))
         .context("Failed to bind to TCP port")
         .map_err(|_| EnclaveError::TlsServerError)?;
+
     while let Ok((stream, _client_ip)) = listener.accept() {
         let Ok(conn) = ServerConnection::new(config.clone()) else {
             continue;
