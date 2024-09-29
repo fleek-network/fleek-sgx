@@ -10,7 +10,6 @@ pub enum EnclaveError {
     FailedToBuildTlsConfig,
     TlsServerError,
     RunnerConnectionFailed,
-    BadCollateral,
     InvalidArgs,
     BadSavedKey,
 }

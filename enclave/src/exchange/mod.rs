@@ -52,15 +52,13 @@ pub fn init() -> Result<Enclave, EnclaveError> {
     report_data[..32].copy_from_slice(&pk_hash_bytes[..32]);
 
     // Generate quote and collateral
-    let (quote, collateral) =
-        generate_for_report_data(report_data).expect("failed to generate http report data");
+    let quote = generate_for_report_data(report_data).expect("failed to generate quote");
 
     let (tls_secret_key, tls_cert) = generate_cert(
         priv_key_tls,
         pub_key_tls,
         AttestationPayload {
             quote: quote.clone(),
-            collateral: serde_json::to_vec(&collateral).map_err(|_| EnclaveError::BadCollateral)?,
         },
         // 1 year
         Duration::from_secs(31536000),

@@ -5,11 +5,10 @@ use ra_verify::types::collateral::SgxCollateral;
 use sgx_isa::{Report, Targetinfo};
 
 /// Generate a quote and collateral for a given report data slice
-pub fn generate_for_report_data(data: [u8; 64]) -> std::io::Result<(Vec<u8>, SgxCollateral)> {
+pub fn generate_for_report_data(data: [u8; 64]) -> std::io::Result<Vec<u8>> {
     let report = report_for_target(data)?;
     let quote = get_quote(report)?;
-    let collateral = get_collateral(&quote)?;
-    Ok((quote, collateral))
+    Ok(quote)
 }
 
 /// Generate a report for the quote target and given data

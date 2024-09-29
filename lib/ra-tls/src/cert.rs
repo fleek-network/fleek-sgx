@@ -28,7 +28,6 @@ pub type Certificate = Vec<u8>;
 #[derive(Serialize, Deserialize)]
 pub struct AttestationPayload {
     pub quote: Vec<u8>,
-    pub collateral: Vec<u8>,
 }
 
 struct AttestationExtension {
