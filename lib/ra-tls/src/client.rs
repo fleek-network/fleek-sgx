@@ -9,13 +9,17 @@ use rustls::{ClientConnection, StreamOwned};
 use crate::cert::{Certificate, PrivateKey};
 use crate::verifier::RemoteAttestationVerifier;
 
-pub fn connect_mtls(
+pub fn connect_mtls<F>(
     mr_enclave: MREnclave,
+    get_collateral: F,
     server_ip: String,
     server_port: u16,
     key: PrivateKey,
     cert: Certificate,
-) -> Result<StreamOwned<ClientConnection, TcpStream>> {
+) -> Result<StreamOwned<ClientConnection, TcpStream>>
+where
+    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+{
     let private_key = PrivatePkcs1KeyDer::from(key);
     let private_key = PrivateKeyDer::from(private_key);
     let cert = CertificateDer::from(cert);
@@ -23,7 +27,10 @@ pub fn connect_mtls(
         rustls::ClientConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
             .with_safe_default_protocol_versions()?
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(RemoteAttestationVerifier::new(mr_enclave)))
+            .with_custom_certificate_verifier(Arc::new(RemoteAttestationVerifier::new(
+                mr_enclave,
+                get_collateral,
+            )))
             .with_client_auth_cert(vec![cert], private_key)?;
 
     config.key_log = Arc::new(rustls::KeyLogFile::new());
@@ -37,16 +44,23 @@ pub fn connect_mtls(
     Ok(tls)
 }
 
-pub fn connect_tls(
+pub fn connect_tls<F>(
     mr_enclave: MREnclave,
+    get_collateral: F,
     server_ip: String,
     server_port: u16,
-) -> Result<StreamOwned<ClientConnection, TcpStream>> {
+) -> Result<StreamOwned<ClientConnection, TcpStream>>
+where
+    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+{
     let mut config =
         rustls::ClientConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
             .with_safe_default_protocol_versions()?
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(RemoteAttestationVerifier::new(mr_enclave)))
+            .with_custom_certificate_verifier(Arc::new(RemoteAttestationVerifier::new(
+                mr_enclave,
+                get_collateral,
+            )))
             .with_no_client_auth();
 
     config.key_log = Arc::new(rustls::KeyLogFile::new());

@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use std::time::SystemTime;
 
 use anyhow::{anyhow, Context};
@@ -34,14 +33,23 @@ use crate::cert::{AttestationPayload, ATTESTATION_OID};
 
 const SAN_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
 
-#[derive(Debug)]
-pub struct RemoteAttestationVerifier {
+pub struct RemoteAttestationVerifier<F>
+where
+    F: Fn(Vec<u8>) -> Vec<u8>,
+{
     mr_enclave: MREnclave,
+    get_collateral: F,
 }
 
-impl RemoteAttestationVerifier {
-    pub fn new(mr_enclave: MREnclave) -> Self {
-        Self { mr_enclave }
+impl<F> RemoteAttestationVerifier<F>
+where
+    F: Fn(Vec<u8>) -> Vec<u8> + 'static,
+{
+    pub fn new(mr_enclave: MREnclave, get_collateral: F) -> Self {
+        Self {
+            mr_enclave,
+            get_collateral,
+        }
     }
 
     fn verify_tls12_signature(
@@ -84,7 +92,19 @@ impl RemoteAttestationVerifier {
     }
 }
 
-impl ServerCertVerifier for RemoteAttestationVerifier {
+impl<F> std::fmt::Debug for RemoteAttestationVerifier<F>
+where
+    F: Fn(Vec<u8>) -> Vec<u8>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RemoteAttestationVerifier")
+    }
+}
+
+impl<F> ServerCertVerifier for RemoteAttestationVerifier<F>
+where
+    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+{
     fn verify_server_cert(
         &self,
         end_entity: &CertificateDer<'_>,
@@ -93,8 +113,13 @@ impl ServerCertVerifier for RemoteAttestationVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
-        verify_with_remote_attestation(&self.mr_enclave, end_entity, intermediates)
-            .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
+        verify_with_remote_attestation(
+            &self.mr_enclave,
+            &self.get_collateral,
+            end_entity,
+            intermediates,
+        )
+        .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
         Ok(ServerCertVerified::assertion())
     }
 
@@ -121,11 +146,15 @@ impl ServerCertVerifier for RemoteAttestationVerifier {
     }
 }
 
-fn verify_with_remote_attestation(
+fn verify_with_remote_attestation<F>(
     mr_enclave: &MREnclave,
+    get_collateral: &F,
     end_entity: &CertificateDer<'_>,
     intermediates: &[CertificateDer<'_>],
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+{
     if !intermediates.is_empty() {
         return Err(anyhow!("ra-tls requires exactly one certificate"));
     }
@@ -165,7 +194,8 @@ fn verify_with_remote_attestation(
                     .context("Failed to deserialize attestation payload")?;
 
                 let mut quote_bytes: &[u8] = &payload.quote;
-                let collateral: SgxCollateral = serde_json::from_slice(&payload.collateral)
+                let collat_bytes = get_collateral(payload.quote.clone());
+                let collateral: SgxCollateral = serde_json::from_slice(&collat_bytes)
                     .context("Failed to deserialize SGX collateral")?;
                 let quote =
                     SgxQuote::read(&mut quote_bytes).context("Failed to deserialize SGX quote")?;
@@ -210,7 +240,10 @@ fn verify_with_remote_attestation(
     Ok(())
 }
 
-impl ClientCertVerifier for RemoteAttestationVerifier {
+impl<F> ClientCertVerifier for RemoteAttestationVerifier<F>
+where
+    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+{
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
         &[]
     }
@@ -221,8 +254,13 @@ impl ClientCertVerifier for RemoteAttestationVerifier {
         intermediates: &[CertificateDer<'_>],
         _now: UnixTime,
     ) -> Result<ClientCertVerified, Error> {
-        verify_with_remote_attestation(&self.mr_enclave, end_entity, intermediates)
-            .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
+        verify_with_remote_attestation(
+            &self.mr_enclave,
+            &self.get_collateral,
+            end_entity,
+            intermediates,
+        )
+        .map_err(|e| Error::General(format!("Failed to attest: {e:?}")))?;
         Ok(ClientCertVerified::assertion())
     }
 

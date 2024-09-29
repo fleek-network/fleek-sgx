@@ -4,6 +4,7 @@ use ra_verify::types::report::MREnclave;
 
 use super::codec::{Codec, FramedStream, Request, Response};
 use crate::error::EnclaveError;
+use crate::req_res::get_collateral;
 use crate::seal_key::SealKeyPair;
 
 pub fn get_secret_key_from_peers(
@@ -16,6 +17,7 @@ pub fn get_secret_key_from_peers(
     for peer in peers {
         if let Ok(mut stream) = ra_tls::client::connect_mtls(
             our_mrenclave,
+            |quote| serde_json::to_vec(&get_collateral(&quote).unwrap()).unwrap(),
             peer,
             crate::config::TLS_PORT,
             tls_private_key.to_vec(),

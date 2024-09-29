@@ -2,6 +2,7 @@ use ra_tls::server::{build_config_mtls, build_config_tls};
 
 use crate::error::EnclaveError;
 use crate::exchange::Enclave;
+use crate::req_res::get_collateral;
 
 mod blockstore;
 mod connection;
@@ -34,8 +35,13 @@ fn main() -> Result<(), EnclaveError> {
 
     // Start mutual TLS server for communication with the enclaves on the other nodes
     let our_mrenclave = report.mrenclave;
-    let server_config = build_config_mtls(tls_secret_key.clone(), tls_cert.clone(), our_mrenclave)
-        .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
+    let server_config = build_config_mtls(
+        tls_secret_key.clone(),
+        tls_cert.clone(),
+        our_mrenclave,
+        |quote| serde_json::to_vec(&get_collateral(&quote).unwrap()).unwrap(),
+    )
+    .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     let shared_priv_key = shared_seal_key.to_private_bytes();
     std::thread::spawn(move || {
         exchange::server::start_mtls_server(server_config, config::MTLS_PORT, shared_priv_key)
