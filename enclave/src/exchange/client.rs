@@ -17,7 +17,7 @@ pub fn get_secret_key_from_peers(
     for peer in peers {
         if let Ok(mut stream) = ra_tls::client::connect_mtls(
             our_mrenclave,
-            |quote| serde_json::to_vec(&get_collateral(&quote).unwrap()).unwrap(),
+            |quote| get_collateral(&quote).map(|c| serde_json::to_vec(&c).unwrap()),
             peer,
             crate::config::TLS_PORT,
             tls_private_key.to_vec(),

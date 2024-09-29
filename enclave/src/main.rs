@@ -39,7 +39,7 @@ fn main() -> Result<(), EnclaveError> {
         tls_secret_key.clone(),
         tls_cert.clone(),
         our_mrenclave,
-        |quote| serde_json::to_vec(&get_collateral(&quote).unwrap()).unwrap(),
+        |quote| get_collateral(&quote).map(|c| serde_json::to_vec(&c).unwrap()),
     )
     .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     let shared_priv_key = shared_seal_key.to_private_bytes();

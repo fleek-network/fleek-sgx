@@ -17,7 +17,7 @@ pub fn build_config_mtls<F>(
     get_collateral: F,
 ) -> Result<ServerConfig>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
 {
     let private_key = PrivatePkcs1KeyDer::from(key);
     let private_key = PrivateKeyDer::from(private_key);

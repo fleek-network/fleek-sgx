@@ -35,7 +35,7 @@ const SAN_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
 
 pub struct RemoteAttestationVerifier<F>
 where
-    F: Fn(Vec<u8>) -> Vec<u8>,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>>,
 {
     mr_enclave: MREnclave,
     get_collateral: F,
@@ -43,7 +43,7 @@ where
 
 impl<F> RemoteAttestationVerifier<F>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + 'static,
 {
     pub fn new(mr_enclave: MREnclave, get_collateral: F) -> Self {
         Self {
@@ -94,7 +94,7 @@ where
 
 impl<F> std::fmt::Debug for RemoteAttestationVerifier<F>
 where
-    F: Fn(Vec<u8>) -> Vec<u8>,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "RemoteAttestationVerifier")
@@ -103,7 +103,7 @@ where
 
 impl<F> ServerCertVerifier for RemoteAttestationVerifier<F>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
 {
     fn verify_server_cert(
         &self,
@@ -153,7 +153,7 @@ fn verify_with_remote_attestation<F>(
     intermediates: &[CertificateDer<'_>],
 ) -> anyhow::Result<()>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
 {
     if !intermediates.is_empty() {
         return Err(anyhow!("ra-tls requires exactly one certificate"));
@@ -194,7 +194,7 @@ where
                     .context("Failed to deserialize attestation payload")?;
 
                 let mut quote_bytes: &[u8] = &payload.quote;
-                let collat_bytes = get_collateral(payload.quote.clone());
+                let collat_bytes = get_collateral(payload.quote.clone())?;
                 let collateral: SgxCollateral = serde_json::from_slice(&collat_bytes)
                     .context("Failed to deserialize SGX collateral")?;
                 let quote =
@@ -242,7 +242,7 @@ where
 
 impl<F> ClientCertVerifier for RemoteAttestationVerifier<F>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
 {
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
         &[]

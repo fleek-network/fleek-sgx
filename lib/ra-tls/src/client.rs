@@ -18,7 +18,7 @@ pub fn connect_mtls<F>(
     cert: Certificate,
 ) -> Result<StreamOwned<ClientConnection, TcpStream>>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
 {
     let private_key = PrivatePkcs1KeyDer::from(key);
     let private_key = PrivateKeyDer::from(private_key);
@@ -51,7 +51,7 @@ pub fn connect_tls<F>(
     server_port: u16,
 ) -> Result<StreamOwned<ClientConnection, TcpStream>>
 where
-    F: Fn(Vec<u8>) -> Vec<u8> + Send + Sync + 'static,
+    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
 {
     let mut config =
         rustls::ClientConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
