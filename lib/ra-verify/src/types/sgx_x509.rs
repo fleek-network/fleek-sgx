@@ -57,15 +57,12 @@ pub struct SgxPckExtension {
     pub pceid: [u8; PCEID_LEN],
     pub fmspc: [u8; FMSPC_LEN],
     _sgx_type: SgxType,
-    //_platform_instance_id: [u8; PLATFORM_INSTANCE_ID_LEN],
-    //_configuration: Configuration,
 }
 
 impl SgxPckExtension {
     /// Whether the `asn_object` a top-level SgxPckExtension
     pub fn is_pck_ext(oid: String) -> bool {
         // check for SGX custom oid
-        //asn_object.nid() == Nid::UNDEF && asn_object.oid_string() == SGX_EXTENSIONS_OID
         oid == SGX_EXTENSIONS_OID
     }
 
@@ -75,8 +72,6 @@ impl SgxPckExtension {
         let mut pceid = None;
         let mut fmspc = None;
         let mut sgx_type = None;
-        //let mut platform_instance_id = None;
-        //let mut configuration = None;
 
         let extensions = asn1::parse_single::<asn1::SequenceOf<SgxExtension>>(der)
             .map_err(|_| anyhow!("could not parse required extension from PCK certificate"))?;
@@ -92,8 +87,6 @@ impl SgxPckExtension {
                 (PCE_ID_OID, &mut pceid),
                 (FMSPC_OID, &mut fmspc),
                 (SGX_TYPE_OID, &mut sgx_type),
-                //(PLATFORM_INSTANCE_OID, &mut platform_instance_id),
-                //(CONFIGURATION_OID, &mut configuration),
             ]),
         )?;
 
@@ -103,8 +96,6 @@ impl SgxPckExtension {
             pceid: pceid.unwrap(),
             fmspc: fmspc.unwrap(),
             _sgx_type: sgx_type.unwrap(),
-            //_platform_instance_id: platform_instance_id.unwrap(),
-            //_configuration: configuration.unwrap(),
         })
     }
 }

@@ -4,7 +4,7 @@ use std::net::TcpStream;
 use ra_verify::types::collateral::SgxCollateral;
 use sgx_isa::{Report, Targetinfo};
 
-/// Generate a quote and collateral for a given report data slice
+/// Generate a quote for a given report data slice
 pub fn generate_for_report_data(data: [u8; 64]) -> std::io::Result<Vec<u8>> {
     let report = report_for_target(data)?;
     let quote = get_quote(report)?;
