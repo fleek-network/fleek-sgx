@@ -16,6 +16,8 @@ mod client;
 mod codec;
 pub mod server;
 
+const MAX_QUOTE_SIZE: usize = 64_000;
+
 /// Initialization output needed for starting the wasm and (m)tls servers up
 pub struct Enclave {
     pub shared_seal_key: Arc<SealKeyPair>,
@@ -53,6 +55,9 @@ pub fn init() -> Result<Enclave, EnclaveError> {
 
     // Generate quote and collateral
     let quote = generate_for_report_data(report_data).expect("failed to generate quote");
+    if quote.len() > MAX_QUOTE_SIZE {
+        return Err(EnclaveError::MaxQuoteSizeExceeded);
+    }
 
     let (tls_secret_key, tls_cert) = generate_cert(
         priv_key_tls,

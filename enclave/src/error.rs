@@ -12,4 +12,5 @@ pub enum EnclaveError {
     RunnerConnectionFailed,
     InvalidArgs,
     BadSavedKey,
+    MaxQuoteSizeExceeded,
 }
