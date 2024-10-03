@@ -19,7 +19,7 @@ pub fn get_secret_key_from_peers(
             our_mrenclave,
             |quote| get_collateral(&quote).map(|c| serde_json::to_vec(&c).unwrap()),
             peer,
-            crate::config::TLS_PORT,
+            crate::config::MTLS_PORT,
             tls_private_key.to_vec(),
             tls_cert.to_vec(),
         ) {
