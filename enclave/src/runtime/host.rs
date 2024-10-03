@@ -103,6 +103,7 @@ impl_define![
     fn0::input_data_size,
     fn0::input_data_copy,
     fn0::output_data_append,
+    fn0::output_data_clear,
     fn0::shared_key_unseal,
     fn0::derived_key_unseal,
     fn0::derived_key_sign
@@ -110,6 +111,7 @@ impl_define![
 
 /// V0 Runtime APIs
 pub mod fn0 {
+    use blake3_tree::blake3::tree::HashTreeBuilder;
     use bytes::{Buf, BufMut, Bytes};
     use libsecp256k1::Signature;
     use sha2::Digest;
@@ -218,6 +220,13 @@ pub mod fn0 {
         state.output.put_slice(region);
 
         0
+    }
+
+    /// Clear output data buffer, for example to be used to write an error mid stream
+    pub fn output_data_clear(mut ctx: Ctx) {
+        let state = ctx.data_mut();
+        state.hasher = HashTreeBuilder::new();
+        state.output.clear();
     }
 
     /// Unseal a section of memory in-place using the shared extended key.
