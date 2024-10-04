@@ -331,7 +331,7 @@ fn verify_tcb_status(
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
 
     use super::{SgxCollateral, SgxQuote};
 
@@ -345,13 +345,18 @@ mod tests {
         (collateral, quote)
     }
 
+    fn test_time() -> SystemTime {
+        // Temporary fix to keep the tests in the expiration range. Will fix shortly
+        SystemTime::now() - Duration::from_secs(2_628_288)
+    }
+
     #[test]
     fn e2e_verify_remote_attestation() {
         let (collateral, quote) = test_data();
         let expected_mrenclave = quote.quote_body.report_body.mrenclave;
 
         // Warning: SystemTime::now() is an insecure api on fortanix targets
-        super::verify_remote_attestation(SystemTime::now(), collateral, quote, &expected_mrenclave)
+        super::verify_remote_attestation(test_time(), collateral, quote, &expected_mrenclave)
             .expect("should have remote attested real good");
     }
 
@@ -359,7 +364,7 @@ mod tests {
     fn verify_integrity() {
         let (collateral, quote) = test_data();
         // Warning: SystemTime::now() is an insecure api on fortanix targets
-        super::verify_integrity(SystemTime::now(), &collateral, &quote)
+        super::verify_integrity(test_time(), &collateral, &quote)
             .expect("certificate chain integrity should succeed");
     }
 
@@ -380,7 +385,7 @@ mod tests {
         let (collateral, quote) = test_data();
 
         // Warning: Systemtime::now()is an insecure api on fortanix targets
-        let tcb_info = super::verify_integrity(SystemTime::now(), &collateral, &quote).unwrap();
+        let tcb_info = super::verify_integrity(test_time(), &collateral, &quote).unwrap();
         super::verify_tcb_status(&tcb_info, &quote.support.pck_extension)
             .expect("tcb status to be valid");
     }
