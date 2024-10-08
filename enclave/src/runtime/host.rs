@@ -106,11 +106,14 @@ impl_define![
     fn0::output_data_clear,
     fn0::shared_key_unseal,
     fn0::derived_key_unseal,
-    fn0::derived_key_sign
+    fn0::derived_key_sign,
+    fn0::insecure_systemtime
 ];
 
 /// V0 Runtime APIs
 pub mod fn0 {
+    use std::time::SystemTime;
+
     use blake3_tree::blake3::tree::HashTreeBuilder;
     use bytes::{Buf, BufMut, Bytes};
     use libsecp256k1::Signature;
@@ -448,5 +451,26 @@ pub mod fn0 {
         signature_buf[64] = v.serialize();
 
         0
+    }
+
+    /// Get an insecure timestamp from the host os, outside of SGX.
+    ///
+    /// This function should *NEVER* be used for cryptographic purposes,
+    /// such as validating certificates, nonces, etc. This operation is
+    /// *NOT* monotonic, so subsequent calls may return a smaller value
+    /// than the previous call.
+    ///
+    /// # Returns
+    ///
+    /// The current u64 timestamp in seconds
+    ///
+    /// # SAFETY
+    ///
+    /// Invalid time from the host os will default to 0
+    pub fn insecure_systemtime() -> u64 {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
     }
 }
