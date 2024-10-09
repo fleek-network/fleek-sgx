@@ -36,10 +36,15 @@ struct ServiceResponseHeader {
     hash: [u8; 32],
     /// Content blake3 tree
     #[serde(with = "hex")]
+    #[serde(skip_serializing_if = "tree_is_one_hash")]
     tree: Vec<u8>,
     /// Network shared key signature
     #[serde(with = "hex")]
     signature: [u8; 65],
+}
+
+fn tree_is_one_hash(tree: &[u8]) -> bool {
+    tree.len() == 32
 }
 
 pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), EnclaveError> {
