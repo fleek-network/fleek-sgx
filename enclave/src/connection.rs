@@ -48,6 +48,9 @@ fn tree_is_one_hash(tree: &[u8]) -> bool {
 }
 
 pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), EnclaveError> {
+    // check if debug printing should be enabled
+    let debug_print = std::env::args().any(|v| v == "--debug");
+
     // bind to userspace address for incoming requests from handshake
     let listener = TcpListener::bind("requests.fleek.network")
         .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
@@ -68,7 +71,7 @@ pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), E
             // Spawn a new thread to handle the connection
             std::thread::spawn(move || {
                 // handle connection
-                if let Err(e) = handle_connection(shared_seal_key, &mut conn) {
+                if let Err(e) = handle_connection(shared_seal_key, &mut conn, debug_print) {
                     let error = format!("Error: {e}");
                     eprintln!("{error}");
                     let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
@@ -93,6 +96,7 @@ pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), E
 fn handle_connection(
     shared_seal_key: Arc<SealKeyPair>,
     conn: &mut (impl Read + Write),
+    debug_print: bool,
 ) -> anyhow::Result<()> {
     println!("handling connection in enclave");
 
@@ -128,7 +132,14 @@ fn handle_connection(
     // Run wasm module
     // TODO: Should we rehash encrypted content, since the encryption hash is
     // non-determanistic, and thus permissions might differ even though module is the same?
-    let output = crate::runtime::execute_module(hash, module, &function, input, shared_seal_key)?;
+    let output = crate::runtime::execute_module(
+        hash,
+        module,
+        &function,
+        input,
+        shared_seal_key,
+        debug_print,
+    )?;
 
     // TODO: Response encodings
     //       - For http: send hash, proof, signature via headers, stream payload in response body.

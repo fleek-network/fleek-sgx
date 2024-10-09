@@ -27,6 +27,7 @@ pub fn execute_module(
     entry: &str,
     request: impl Into<Bytes>,
     shared_secret_key: Arc<SealKeyPair>,
+    debug_print: bool,
 ) -> anyhow::Result<WasmOutput> {
     let input = request.into();
     println!("input data: {input:?}");
@@ -44,7 +45,7 @@ pub fn execute_module(
     let engine = Engine::new(&config);
     let mut store = Store::new(
         &engine,
-        HostState::new(shared_secret_key.clone(), hash, input),
+        HostState::new(shared_secret_key.clone(), hash, input, debug_print),
     );
 
     // Setup linker and define the host functions

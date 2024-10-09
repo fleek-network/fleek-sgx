@@ -14,16 +14,18 @@ pub struct HostState {
     input: Bytes,
     output: BytesMut,
     hasher: HashTreeBuilder,
+    debug_print: bool,
 }
 
 impl HostState {
-    pub fn new(shared: Arc<SealKeyPair>, hash: [u8; 32], input: Bytes) -> Self {
+    pub fn new(shared: Arc<SealKeyPair>, hash: [u8; 32], input: Bytes, debug_print: bool) -> Self {
         Self {
             shared,
             hash,
             input,
             output: BytesMut::new(),
             hasher: HashTreeBuilder::new(),
+            debug_print,
         }
     }
 
@@ -107,7 +109,8 @@ impl_define![
     fn0::shared_key_unseal,
     fn0::derived_key_unseal,
     fn0::derived_key_sign,
-    fn0::insecure_systemtime
+    fn0::insecure_systemtime,
+    fn0::debug_print,
 ];
 
 /// V0 Runtime APIs
@@ -472,5 +475,32 @@ pub mod fn0 {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
+    }
+
+    /// When enclave is started with debug flag, enables printing a valid utf8 string to stdout on
+    /// the host. No-op when debug is disabled, or input is invalid.
+    ///
+    /// # Parameters
+    ///
+    /// * `ptr`: Memory offset of utf8 bytes
+    /// * `len`: Length of utf8 bytes to print
+    pub fn debug_print(ctx: Ctx, ptr: u32, len: u32) {
+        let ptr = ptr as usize;
+        let len = len as usize;
+        let state = ctx.data();
+
+        if state.debug_print {
+            // SAFETY: We ensure this exists before running anything
+            let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
+            let Some(bytes) = memory.data(&ctx).get(ptr..ptr + len) else {
+                return;
+            };
+            let Ok(string) = String::from_utf8(bytes.to_vec()) else {
+                return;
+            };
+
+            // print first 8 chars of hash and debug message
+            println!("{}.wasm: {string}", &hex::encode(&state.hash[..4]));
+        }
     }
 }
