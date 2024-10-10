@@ -30,25 +30,26 @@ use x509_cert::ext::pkix::SubjectAltName;
 use x509_cert::spki::AlgorithmIdentifierOwned;
 
 use crate::cert::{AttestationPayload, ATTESTATION_OID};
+use crate::collateral_prov::CollateralProvider;
 
 const SAN_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
 
-pub struct RemoteAttestationVerifier<F>
+pub struct RemoteAttestationVerifier<C>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>>,
+    C: CollateralProvider,
 {
     mr_enclave: MREnclave,
-    get_collateral: F,
+    collateral_provider: C,
 }
 
-impl<F> RemoteAttestationVerifier<F>
+impl<C> RemoteAttestationVerifier<C>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + 'static,
+    C: CollateralProvider + 'static,
 {
-    pub fn new(mr_enclave: MREnclave, get_collateral: F) -> Self {
+    pub fn new(mr_enclave: MREnclave, collateral_provider: C) -> Self {
         Self {
             mr_enclave,
-            get_collateral,
+            collateral_provider,
         }
     }
 
@@ -92,18 +93,18 @@ where
     }
 }
 
-impl<F> std::fmt::Debug for RemoteAttestationVerifier<F>
+impl<C> std::fmt::Debug for RemoteAttestationVerifier<C>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>>,
+    C: CollateralProvider,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "RemoteAttestationVerifier")
     }
 }
 
-impl<F> ServerCertVerifier for RemoteAttestationVerifier<F>
+impl<C> ServerCertVerifier for RemoteAttestationVerifier<C>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
+    C: CollateralProvider + Send + Sync + 'static,
 {
     fn verify_server_cert(
         &self,
@@ -115,7 +116,7 @@ where
     ) -> Result<ServerCertVerified, Error> {
         verify_with_remote_attestation(
             &self.mr_enclave,
-            &self.get_collateral,
+            &self.collateral_provider,
             end_entity,
             intermediates,
         )
@@ -146,14 +147,14 @@ where
     }
 }
 
-fn verify_with_remote_attestation<F>(
+fn verify_with_remote_attestation<C>(
     mr_enclave: &MREnclave,
-    get_collateral: &F,
+    collateral_provider: &C,
     end_entity: &CertificateDer<'_>,
     intermediates: &[CertificateDer<'_>],
 ) -> anyhow::Result<()>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
+    C: CollateralProvider + Send + Sync + 'static,
 {
     if !intermediates.is_empty() {
         return Err(anyhow!("ra-tls requires exactly one certificate"));
@@ -194,7 +195,7 @@ where
                     .context("Failed to deserialize attestation payload")?;
 
                 let mut quote_bytes: &[u8] = &payload.quote;
-                let collat_bytes = get_collateral(payload.quote.clone())?;
+                let collat_bytes = collateral_provider.get_collateral(payload.quote.clone())?;
                 let collateral: SgxCollateral = serde_json::from_slice(&collat_bytes)
                     .context("Failed to deserialize SGX collateral")?;
                 let quote =
@@ -240,9 +241,9 @@ where
     Ok(())
 }
 
-impl<F> ClientCertVerifier for RemoteAttestationVerifier<F>
+impl<C> ClientCertVerifier for RemoteAttestationVerifier<C>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
+    C: CollateralProvider + Send + Sync + 'static,
 {
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
         &[]
@@ -256,7 +257,7 @@ where
     ) -> Result<ClientCertVerified, Error> {
         verify_with_remote_attestation(
             &self.mr_enclave,
-            &self.get_collateral,
+            &self.collateral_provider,
             end_entity,
             intermediates,
         )

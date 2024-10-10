@@ -7,18 +7,19 @@ use rustls::pki_types::{CertificateDer, IpAddr, PrivateKeyDer, PrivatePkcs1KeyDe
 use rustls::{ClientConnection, StreamOwned};
 
 use crate::cert::{Certificate, PrivateKey};
+use crate::collateral_prov::CollateralProvider;
 use crate::verifier::RemoteAttestationVerifier;
 
-pub fn connect_mtls<F>(
+pub fn connect_mtls<C>(
     mr_enclave: MREnclave,
-    get_collateral: F,
+    collateral_provider: C,
     server_ip: String,
     server_port: u16,
     key: PrivateKey,
     cert: Certificate,
 ) -> Result<StreamOwned<ClientConnection, TcpStream>>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
+    C: CollateralProvider + Send + Sync + 'static,
 {
     let private_key = PrivatePkcs1KeyDer::from(key);
     let private_key = PrivateKeyDer::from(private_key);
@@ -29,7 +30,7 @@ where
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(RemoteAttestationVerifier::new(
                 mr_enclave,
-                get_collateral,
+                collateral_provider,
             )))
             .with_client_auth_cert(vec![cert], private_key)?;
 
@@ -44,14 +45,14 @@ where
     Ok(tls)
 }
 
-pub fn connect_tls<F>(
+pub fn connect_tls<C>(
     mr_enclave: MREnclave,
-    get_collateral: F,
+    collateral_provider: C,
     server_ip: String,
     server_port: u16,
 ) -> Result<StreamOwned<ClientConnection, TcpStream>>
 where
-    F: Fn(Vec<u8>) -> std::io::Result<Vec<u8>> + Send + Sync + 'static,
+    C: CollateralProvider + Send + Sync + 'static,
 {
     let mut config =
         rustls::ClientConfig::builder_with_provider(Arc::new(rustls_rustcrypto::provider()))
@@ -59,7 +60,7 @@ where
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(RemoteAttestationVerifier::new(
                 mr_enclave,
-                get_collateral,
+                collateral_provider,
             )))
             .with_no_client_auth();
 

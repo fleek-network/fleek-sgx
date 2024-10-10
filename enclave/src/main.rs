@@ -1,8 +1,8 @@
 use ra_tls::server::{build_config_mtls, build_config_tls};
 
 use crate::error::EnclaveError;
+use crate::exchange::collateral_prov::EnclaveCollateralProvider;
 use crate::exchange::Enclave;
-use crate::req_res::get_collateral;
 
 mod blockstore;
 mod connection;
@@ -39,7 +39,7 @@ fn main() -> Result<(), EnclaveError> {
         tls_secret_key.clone(),
         tls_cert.clone(),
         our_mrenclave,
-        |quote| get_collateral(&quote).map(|c| serde_json::to_vec(&c).unwrap()),
+        EnclaveCollateralProvider::default(),
     )
     .map_err(|_| EnclaveError::FailedToBuildTlsConfig)?;
     let shared_priv_key = shared_seal_key.to_private_bytes();

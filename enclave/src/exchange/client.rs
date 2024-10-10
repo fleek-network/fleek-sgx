@@ -3,8 +3,8 @@ use std::io::Write;
 use ra_verify::types::report::MREnclave;
 
 use super::codec::{Codec, FramedStream, Request, Response};
+use super::collateral_prov::EnclaveCollateralProvider;
 use crate::error::EnclaveError;
-use crate::req_res::get_collateral;
 use crate::seal_key::SealKeyPair;
 
 pub fn get_secret_key_from_peers(
@@ -17,7 +17,7 @@ pub fn get_secret_key_from_peers(
     for peer in peers {
         if let Ok(mut stream) = ra_tls::client::connect_mtls(
             our_mrenclave,
-            |quote| get_collateral(&quote).map(|c| serde_json::to_vec(&c).unwrap()),
+            EnclaveCollateralProvider::default(),
             peer,
             crate::config::MTLS_PORT,
             tls_private_key.to_vec(),

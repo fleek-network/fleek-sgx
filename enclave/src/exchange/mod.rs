@@ -14,6 +14,7 @@ use crate::seal_key::SealKeyPair;
 
 mod client;
 mod codec;
+pub mod collateral_prov;
 pub mod server;
 
 const MAX_QUOTE_SIZE: usize = 64_000;
