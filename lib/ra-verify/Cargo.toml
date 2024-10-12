@@ -21,11 +21,19 @@ bitflags = "2.3.3"
 
 # Rustcrypto ecosystem
 pem = "3.0.4"
-x509-cert = "0.2.5"
+x509-cert = { version = "0.2.5", features = ["pem"] }
 p256 = "0.13.2"
 sha2 = "0.10.8"
+
+# Optional dependencies for the 'api' feature
+urlencoding = { version = "2.1", optional = true }
+ureq = { version = "2.10", optional = true }
+base16 = { version = "0.2", optional = true }
 
 [dependencies.x509-verify]
 version = "0.4.6"
 default-features = false
 features = [ "std", "p256", "x509" ]
+
+[features]
+api = ["urlencoding", "ureq", "base16"]

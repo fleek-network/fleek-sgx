@@ -19,6 +19,8 @@ use crate::types::sgx_x509::SgxPckExtension;
 use crate::types::tcb_info::{TcbLevel, TcbStatus};
 use crate::types::TcbStanding;
 
+#[cfg(feature = "api")]
+pub mod api;
 mod pki;
 mod utils;
 
