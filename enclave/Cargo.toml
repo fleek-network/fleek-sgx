@@ -5,11 +5,11 @@ edition = "2021"
 
 [dependencies]
 # WASM Runtime
-wasmi = "=0.36.1"
+wasmi = "=0.38.0"
 
 # Error stuffs
 anyhow = "=1.0.89"
-thiserror = "=1.0.63"
+thiserror = "=1.0.64"
 
 # IO
 arrayref = "=0.3.9"
