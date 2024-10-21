@@ -33,7 +33,7 @@ impl HostState {
         (self.hasher.finalize(), self.output.freeze())
     }
 
-    /// Derive a wasm module specific, non-hardened, bip32 key pair from the shared extended key.
+    /// Derive a non-hardened, wasm module specific bip32 key pair from the shared extended key.
     ///
     /// Rough algorithm is as follows:
     ///
@@ -53,7 +53,11 @@ impl HostState {
     ///
     /// Ok(derived_key)
     /// ```
-    pub fn derive_wasm_key(&mut self, path: &[u8]) -> anyhow::Result<Rc<SealKeyPair>> {
+    pub fn derive_wasm_key(
+        &mut self,
+        hash: Option<[u8; 32]>,
+        path: &[u8],
+    ) -> anyhow::Result<Rc<SealKeyPair>> {
         // Derive child for scope
         let mut secret = self
             .shared
@@ -61,8 +65,8 @@ impl HostState {
             .derive_child(ChildNumber::new(0, false)?)?;
 
         // Derive child for wasm hash (16 iterations)
-        for n in self
-            .hash
+        let hash = hash.unwrap_or(self.hash);
+        for n in hash
             .chunks_exact(2)
             .map(|v| u16::from_be_bytes(v.try_into().unwrap()).into())
         {
@@ -106,7 +110,9 @@ impl_define![
     fn0::input_data_copy,
     fn0::output_data_append,
     fn0::output_data_clear,
+    fn0::shared_key_public,
     fn0::shared_key_unseal,
+    fn0::derived_key_public,
     fn0::derived_key_unseal,
     fn0::derived_key_sign,
     fn0::insecure_systemtime,
@@ -117,6 +123,8 @@ impl_define![
 pub mod fn0 {
     use std::time::SystemTime;
 
+    use arrayref::array_ref;
+    use bip32::PublicKey;
     use blake3_tree::blake3::tree::HashTreeBuilder;
     use bytes::{Buf, BufMut, Bytes};
     use libsecp256k1::Signature;
@@ -235,6 +243,34 @@ pub mod fn0 {
         state.output.clear();
     }
 
+    /// Get the current shared bip32 extended key, encoded as utf8 xpub (112 bytes)
+    ///
+    /// # Parameters
+    ///
+    /// * `buf_ptr`: Memory offset to write 112 byte xpub key to
+    ///
+    /// # Returns
+    ///
+    /// * ` 0`: Success
+    /// * `<0`: Host error
+    pub fn shared_key_public(mut ctx: Ctx, buf_ptr: u32) -> i32 {
+        let buf_ptr = buf_ptr as usize;
+
+        let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
+        let (memory, state) = memory.data_and_store_mut(&mut ctx);
+
+        // Get provided buffer to write extended public key into
+        let Some(buf) = memory.get_mut(buf_ptr..buf_ptr + 112) else {
+            return HostError::OutOfBounds as i32;
+        };
+
+        // Encode extended bip32 public key (xpub)
+        let pk = state.shared.public.to_string(bip32::Prefix::XPUB);
+        buf.copy_from_slice(pk.as_bytes());
+
+        0
+    }
+
     /// Unseal a section of memory in-place using the shared extended key.
     ///
     /// # Handling permissions
@@ -320,6 +356,68 @@ pub mod fn0 {
         plaintext.len() as i32
     }
 
+    /// Write the raw compressed secp256k1 public key of a derived key to a buffer
+    ///
+    /// # Parameters
+    ///
+    /// * `wasm_ptr`: Zero pointer to use the current wasm module or memory offset of 32 byte slice
+    ///   containing the wasm hash
+    /// * `path_ptr`: Memory offset of key derivation path
+    /// * `path_len`: Length of path, must be an even number <= 256
+    /// * `buf_ptr`: Memory offset to write 33 byte compressed public key into
+    ///
+    /// # Returns
+    ///
+    /// * ` 0`: Success
+    /// * `<0`: Host error
+    pub fn derived_key_public(
+        mut ctx: Ctx,
+        wasm_ptr: u32,
+        path_ptr: u32,
+        path_len: u32,
+        buf_ptr: u32,
+    ) -> i32 {
+        let wasm_ptr = wasm_ptr as usize;
+        let path_ptr = path_ptr as usize;
+        let path_len = path_len as usize;
+        let buf_ptr = buf_ptr as usize;
+
+        // Error if path length is greater than 256, or odd
+        if path_len > 256 || path_len % 2 != 0 {
+            return HostError::KeyDerivationInvalidPath as i32;
+        }
+
+        // SAFETY: We ensure this exists before running anything
+        let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
+        let (memory, state) = memory.data_and_store_mut(&mut ctx);
+
+        // Read wasm hash
+        let hash = if wasm_ptr != 0 {
+            let Some(bytes) = memory.get(wasm_ptr..wasm_ptr + 32) else {
+                return HostError::OutOfBounds as i32;
+            };
+            Some(*array_ref![bytes, 0, 32])
+        } else {
+            None
+        };
+
+        // Derive the client key
+        let Some(path) = memory.get(path_ptr..path_ptr + path_len) else {
+            return HostError::OutOfBounds as i32;
+        };
+        let Ok(key) = state.derive_wasm_key(hash, path) else {
+            return HostError::KeyDerivation as i32;
+        };
+
+        // Get slice of buffer and write the public key to it
+        let Some(slice) = memory.get_mut(buf_ptr..buf_ptr + 33) else {
+            return HostError::OutOfBounds as i32;
+        };
+        slice.copy_from_slice(&key.public.public_key().to_bytes());
+
+        0
+    }
+
     /// Derive a wasm specific key from the shared key, with a given path up to `[u16; 128]`, and
     /// unseal encrypted data with it.
     ///
@@ -363,7 +461,7 @@ pub mod fn0 {
         let Some(path) = memory.get(path_ptr..path_ptr + path_len) else {
             return HostError::OutOfBounds as i32;
         };
-        let Ok(key) = state.derive_wasm_key(path) else {
+        let Ok(key) = state.derive_wasm_key(None, path) else {
             return HostError::KeyDerivation as i32;
         };
 
@@ -433,7 +531,7 @@ pub mod fn0 {
         let Some(path) = memory.get(path_ptr..path_ptr + path_len) else {
             return HostError::OutOfBounds as i32;
         };
-        let Ok(key) = state.derive_wasm_key(path) else {
+        let Ok(key) = state.derive_wasm_key(None, path) else {
             return HostError::KeyDerivation as i32;
         };
 
