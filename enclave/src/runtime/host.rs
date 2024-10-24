@@ -128,7 +128,6 @@ pub mod fn0 {
     use blake3_tree::blake3::tree::HashTreeBuilder;
     use bytes::{Buf, BufMut, Bytes};
     use libsecp256k1::Signature;
-    use sha2::Digest;
     use wasmi::Caller;
 
     use super::HostState;
@@ -484,14 +483,13 @@ pub mod fn0 {
     }
 
     /// Derive a wasm specific key from the shared key, with a given path up to `[u16; 128]`, and
-    /// sign the sha256 hash of some data with it.
+    /// sign a 32 byte digest with it.
     ///
     /// # Parameters
     ///
     /// * `path_ptr`: Memory offset of key derivation path
     /// * `path_len`: Length of path, must be an even number <= 256
-    /// * `data_ptr`: Memory offset of data to hash and sign
-    /// * `data_len`: Length of data to hash and sign
+    /// * `digest_ptr`: Memory offset of the 32 byte digest to sign
     /// * `signature_buf_ptr`: Memory offset to write 65 byte signature to
     ///
     /// # Returns
@@ -502,14 +500,13 @@ pub mod fn0 {
         mut ctx: Ctx,
         path_ptr: u32,
         path_len: u32,
-        data_ptr: u32,
-        data_len: u32,
+        digest_ptr: u32,
         signature_buf_ptr: u32,
     ) -> i32 {
         let path_ptr = path_ptr as usize;
         let path_len = path_len as usize;
-        let data_ptr = data_ptr as usize;
-        let data_len = data_len as usize;
+        let digest_ptr = digest_ptr as usize;
+
         let signature_buf_ptr = signature_buf_ptr as usize;
 
         // Error if path length is greater than 256, or odd
@@ -522,10 +519,10 @@ pub mod fn0 {
         let (memory, state) = memory.data_and_store_mut(&mut ctx);
 
         // Get and hash user data to sign
-        let Some(data) = memory.get(data_ptr..(data_ptr + data_len)) else {
+        let Some(digest) = memory.get(digest_ptr..digest_ptr + 32) else {
             return HostError::OutOfBounds as i32;
         };
-        let message = sha2::Sha256::digest(data).into();
+        let message = digest.try_into().unwrap();
 
         // Derive the client key
         let Some(path) = memory.get(path_ptr..path_ptr + path_len) else {
@@ -546,7 +543,7 @@ pub mod fn0 {
             &key.secret.private_key().0,
         );
 
-        // write signature to buffer, ethereum style
+        // write signature to buffer in RLP encoding
         signature_buf[0..32].copy_from_slice(&r.b32());
         signature_buf[32..64].copy_from_slice(&s.b32());
         signature_buf[64] = v.serialize();
