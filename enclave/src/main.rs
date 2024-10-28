@@ -17,6 +17,7 @@ pub(crate) mod config {
     pub const MAX_INPUT_SIZE: usize = 8 << 20; // 8 MiB
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
     pub const MAX_CONCURRENT_WASM_THREADS: usize = 128;
+    pub const MAX_FUEL_LIMIT: u64 = 10 << 32; // 40 billion
     pub const TLS_KEY_SIZE: usize = 2048;
     pub const MTLS_PORT: u16 = 55855;
     pub const TLS_PORT: u16 = 55856;

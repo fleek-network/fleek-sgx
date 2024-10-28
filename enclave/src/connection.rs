@@ -1,50 +1,158 @@
+use std::borrow::Cow;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 
 use anyhow::bail;
 use bytes::BufMut;
+use libsecp256k1::Signature;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::EnclaveError;
 use crate::seal_key::SealKeyPair;
 use crate::{blockstore, config};
 
+/// Client request to the service
 #[derive(Serialize, Deserialize)]
-struct ServiceRequest {
+struct ServiceRequest<'a> {
     /// Blake3 hash of the wasm module.
-    hash: String,
+    hash: Cow<'a, str>,
+
     /// Optionally enable decrypting the wasm file
     #[serde(default)]
     decrypt: bool,
-    /// Entrypoint function to call. Defaults to `main`.
-    #[serde(default = "default_function_name")]
-    function: String,
+
+    /// Fuel limit to set. Defaults to the maximum instruction count.
+    /// Node can implement a check against the client balance to be
+    /// able to pay for the computation or not.
+    #[serde(default = "ServiceRequest::max_fuel_limit")]
+    fuel: u64,
+
+    /// Entrypoint function to call. Defaults to `main` if not set.
+    #[serde(default = "ServiceRequest::default_function_name")]
+    function: Cow<'a, str>,
+
     /// Input data string.
     #[serde(default)]
-    input: String,
+    input: Cow<'a, str>,
 }
 
-fn default_function_name() -> String {
-    "main".into()
+impl ServiceRequest<'_> {
+    /// Maximum and default fuel limit (~40 Billion)
+    const fn max_fuel_limit() -> u64 {
+        crate::config::MAX_FUEL_LIMIT
+    }
+
+    /// Default function name to run (`main`)
+    const fn default_function_name() -> Cow<'static, str> {
+        Cow::Borrowed("main")
+    }
+
+    /// Hashing function for request parameters
+    ///
+    /// ## Pseudo-code
+    ///
+    /// ```text
+    /// Sha256(
+    ///   "MODULE_HASH" . hex encoded hash .
+    ///   "MODULE_DECRYPT" . 0 or 1 .
+    ///   "FUEL_LIMIT" . be u64 .
+    ///   "FUNCTION_NAME" . u8 length . name .
+    ///   "INPUT_DATA" . be u64 length . data
+    /// )
+    /// ```
+    pub fn hash_parameters(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+
+        // UTF8 hex-encoded blake3 hash
+        hasher.update(b"MODULE_HASH");
+        hasher.update(self.hash.as_bytes());
+        // Decrypt flag (0 or 1)
+        hasher.update(b"MODULE_DECRYPT");
+        hasher.update([self.decrypt as u8]);
+        // Big endian encoded 128 bit fuel limit
+        hasher.update(b"FUEL_LIMIT");
+        hasher.update(self.fuel.to_be_bytes());
+        // Function name to call
+        hasher.update(b"FUNCTION_NAME");
+        hasher.update((self.function.len() as u8).to_be_bytes());
+        hasher.update(self.function.as_bytes());
+        // Input data provided
+        hasher.update(b"INPUT_DATA");
+        hasher.update((self.input.len() as u64).to_be_bytes());
+        hasher.update(self.input.as_bytes());
+
+        hasher.finalize().into()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 struct ServiceResponseHeader {
-    /// Content hash
+    /// Hex-encoded sha256 hash for the input parameters
     #[serde(with = "hex")]
-    hash: [u8; 32],
-    /// Content blake3 tree
+    input_hash: [u8; 32],
+
+    /// Hex-encoded blake3 hash for the output
+    #[serde(with = "hex")]
+    output_hash: [u8; 32],
+
+    /// Blake3 tree for the output.
+    /// If content is only one block (256KiB), the tree is ignored
     #[serde(with = "hex")]
     #[serde(skip_serializing_if = "tree_is_one_hash")]
-    tree: Vec<u8>,
-    /// Network shared key signature
+    output_tree: Vec<u8>,
+
+    /// Network shared key signature for sha256(hash . input hash), encoded as [ r . s . v ]
     #[serde(with = "hex")]
     signature: [u8; 65],
 }
 
 fn tree_is_one_hash(tree: &[u8]) -> bool {
     tree.len() == 32
+}
+
+impl ServiceResponseHeader {
+    /// Sign a new response header for a given input and output with the shared seal key
+    ///
+    /// ## Pseudo-code
+    ///
+    /// ```text
+    /// hash = Sha256( "INPUT_HASH" . input hash . "OUTPUT_HASH" . output hash )
+    /// signature = shared_key.sign(hash)
+    /// ```
+    fn sign(
+        input_hash: [u8; 32],
+        output_hash: [u8; 32],
+        output_tree: Vec<u8>,
+        shared_seal_key: &SealKeyPair,
+    ) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(b"INPUT_HASH");
+        hasher.update(input_hash);
+        hasher.update(b"OUTPUT_HASH");
+        hasher.update(output_hash);
+        let hash = hasher.finalize();
+
+        // Sign output with shared key
+        let (Signature { r, s }, v) = libsecp256k1::sign(
+            &libsecp256k1::Message::parse(hash.as_ref()),
+            &shared_seal_key.secret.private_key().0,
+        );
+
+        // Encode signature
+        let mut signature = [0u8; 65];
+        signature[0..32].copy_from_slice(&r.b32());
+        signature[32..64].copy_from_slice(&s.b32());
+        signature[64] = v.into();
+
+        Self {
+            output_tree,
+            output_hash,
+            input_hash,
+            signature,
+        }
+    }
 }
 
 pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), EnclaveError> {
@@ -109,23 +217,16 @@ fn handle_connection(
         bail!("input too large");
     }
 
-    // Read payload
+    // Read and parse payload
     let mut payload = vec![0; len];
     conn.read_exact(&mut payload)?;
-
-    // Parse payload
-    let ServiceRequest {
-        hash,
-        function,
-        input,
-        decrypt,
-    } = serde_json::from_slice(&payload)?;
+    let req: ServiceRequest = serde_json::from_slice(&payload)?;
 
     // Fetch content from blockstore
-    let (hash, mut module) = blockstore::get_verified_content(&hash)?;
+    let (hash, mut module) = blockstore::get_verified_content(&req.hash)?;
 
     // Optionally decrypt the module
-    if decrypt {
+    if req.decrypt {
         module = ecies::decrypt(&shared_seal_key.secret.to_bytes(), &module)?;
     }
 
@@ -135,11 +236,19 @@ fn handle_connection(
     let output = crate::runtime::execute_module(
         hash,
         module,
-        &function,
-        input,
-        shared_seal_key,
+        &req.function,
+        req.input.as_bytes(),
+        shared_seal_key.clone(),
         debug_print,
     )?;
+
+    // Sign and construct output header
+    let signed_header = ServiceResponseHeader::sign(
+        req.hash_parameters(),
+        output.hash.into(),
+        output.tree.into_iter().flatten().collect(),
+        &shared_seal_key,
+    );
 
     // TODO: Response encodings
     //       - For http: send hash, proof, signature via headers, stream payload in response body.
@@ -150,11 +259,7 @@ fn handle_connection(
     //       - For all others: send hash, signature, then verified b3 stream of content
 
     // For now, send a json header before the output data, delimiting with a CRLF `\r\n`
-    let mut header = serde_json::to_vec(&ServiceResponseHeader {
-        hash: output.hash.into(),
-        tree: output.tree.into_iter().flatten().collect(),
-        signature: output.signature,
-    })?;
+    let mut header = serde_json::to_vec(&signed_header)?;
     header.put_slice(b"\r\n");
 
     // Write to output

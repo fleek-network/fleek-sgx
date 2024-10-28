@@ -4,7 +4,6 @@ use anyhow::bail;
 use blake3_tree::blake3::tree::HashTree;
 use blake3_tree::blake3::Hash;
 use bytes::Bytes;
-use libsecp256k1::Signature;
 use wasmi::{Config, Engine, Linker, Module, Store};
 
 use crate::runtime::host::HostState;
@@ -18,18 +17,17 @@ pub struct WasmOutput {
     pub payload: Bytes,
     pub hash: Hash,
     pub tree: Vec<[u8; 32]>,
-    pub signature: [u8; 65],
 }
 
 pub fn execute_module(
     hash: [u8; 32],
     module: impl AsRef<[u8]>,
-    entry: &str,
-    request: impl Into<Bytes>,
+    name: &str,
+    input: &[u8],
     shared_secret_key: Arc<SealKeyPair>,
     debug_print: bool,
 ) -> anyhow::Result<WasmOutput> {
-    let input = request.into();
+    let input = input.to_vec().into();
     println!("input data: {input:?}");
 
     // Configure wasm engine
@@ -45,7 +43,7 @@ pub fn execute_module(
     let engine = Engine::new(&config);
     let mut store = Store::new(
         &engine,
-        HostState::new(shared_secret_key.clone(), hash, input, debug_print),
+        HostState::new(shared_secret_key, hash, input, debug_print),
     );
 
     // Setup linker and define the host functions
@@ -64,22 +62,10 @@ pub fn execute_module(
     // TODO(oz): Should we support calling the function with `int argc, *argv[]`?
     //           We could expose an "args" request parameter with a vec of strings.
     //           If not, how can we eliminate needing to satisfy this signature?
-    let func = instance.get_typed_func::<(i32, i32), i32>(&mut store, entry)?;
+    let func = instance.get_typed_func::<(i32, i32), i32>(&mut store, name)?;
     func.call(&mut store, (0, 0))?;
 
     let (HashTree { hash, tree }, payload) = store.into_data().finalize();
-
-    // Sign output
-    let (Signature { r, s }, v) = libsecp256k1::sign(
-        &libsecp256k1::Message::parse(hash.as_bytes()),
-        &shared_secret_key.secret.private_key().0,
-    );
-
-    // Encode signature, ethereum style
-    let mut signature = [0u8; 65];
-    signature[0..32].copy_from_slice(&r.b32());
-    signature[32..64].copy_from_slice(&s.b32());
-    signature[64] = v.into();
 
     println!("wasm output: {hash}");
 
@@ -87,6 +73,5 @@ pub fn execute_module(
         payload,
         hash,
         tree,
-        signature,
     })
 }
