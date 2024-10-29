@@ -346,8 +346,8 @@ mod tests {
     }
 
     fn test_time() -> SystemTime {
-        // Temporary fix to keep the tests in the expiration range. Will fix shortly
-        SystemTime::now() - Duration::from_secs(2_628_288)
+        // Aug 29th 4:20pm, ~24 hours after quote was generated
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1724962800)
     }
 
     #[test]
