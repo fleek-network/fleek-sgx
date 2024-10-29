@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use blake3_tree::blake3::tree::HashTree;
 use blake3_tree::blake3::Hash;
 use bytes::Bytes;
@@ -30,7 +30,6 @@ pub fn execute_module(
     debug_print: bool,
 ) -> anyhow::Result<WasmOutput> {
     let input = input.to_vec().into();
-    println!("input data: {input:?}");
 
     // Configure wasm engine
     let mut config = Config::default();
@@ -57,8 +56,12 @@ pub fn execute_module(
     host::define(&mut store, &mut linker).expect("failed to define host functions");
 
     // Initialize the module
-    let module = Module::new(&engine, module.as_ref())?;
-    let instance = linker.instantiate(&mut store, &module)?.start(&mut store)?;
+    let module = Module::new(&engine, module.as_ref()).context("failed to build module")?;
+    let instance = linker
+        .instantiate(&mut store, &module)
+        .context("failed to instantiate module")?
+        .start(&mut store)
+        .context("failed to execute start function")?;
 
     if instance.get_memory(&mut store, "memory").is_none() {
         bail!("`memory` not found in wasm instance")
@@ -69,7 +72,8 @@ pub fn execute_module(
     //           We could expose an "args" request parameter with a vec of strings.
     //           If not, how can we eliminate needing to satisfy this signature?
     let func = instance.get_typed_func::<(i32, i32), i32>(&mut store, name)?;
-    func.call(&mut store, (0, 0))?;
+    func.call(&mut store, (0, 0))
+        .with_context(|| format!("failed to call `{name}`"))?;
 
     let fuel_after = store.get_fuel().expect("metering to be enabled");
     let fuel_used = fuel - fuel_after;

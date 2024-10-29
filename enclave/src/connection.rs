@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use bytes::BufMut;
 use libsecp256k1::Signature;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -210,7 +210,7 @@ pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), E
                 // handle connection
                 if let Err(e) = handle_connection(shared_seal_key, &mut conn, debug_print) {
                     let error = format!("Error: {e}");
-                    eprintln!("{error}");
+                    eprintln!("Runtime error: {error}");
                     let _ = conn.write_all(&(error.len() as u32).to_be_bytes());
                     let _ = conn.write_all(error.as_bytes());
                 }
@@ -249,7 +249,7 @@ fn handle_connection(
     // Read and parse payload
     let mut payload = vec![0; len];
     conn.read_exact(&mut payload)?;
-    let request: ServiceRequest = serde_json::from_slice(&payload)?;
+    let request: ServiceRequest = serde_json::from_slice(&payload).context("invalid request")?;
 
     // Fetch content from blockstore
     let (hash, mut module) = blockstore::get_verified_content(&request.hash)?;
@@ -270,7 +270,8 @@ fn handle_connection(
         request.input.as_bytes(),
         shared_seal_key.clone(),
         debug_print,
-    )?;
+    )
+    .with_context(|| format!("failed to execute `{}`", request.hash))?;
 
     // Sign and construct output header
     let signed_header = ServiceResponseHeader::sign_request(
