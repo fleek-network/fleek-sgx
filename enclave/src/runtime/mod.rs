@@ -14,9 +14,10 @@ mod host;
 /// Verified wasm runtime output
 #[allow(unused)]
 pub struct WasmOutput {
-    pub payload: Bytes,
+    pub fuel_used: u64,
     pub hash: Hash,
     pub tree: Vec<[u8; 32]>,
+    pub payload: Bytes,
 }
 
 pub fn execute_module(
@@ -70,13 +71,17 @@ pub fn execute_module(
     let func = instance.get_typed_func::<(i32, i32), i32>(&mut store, name)?;
     func.call(&mut store, (0, 0))?;
 
+    let fuel_after = store.get_fuel().expect("metering to be enabled");
+    let fuel_used = fuel - fuel_after;
+
     let (HashTree { hash, tree }, payload) = store.into_data().finalize();
 
     println!("wasm output: {hash}");
 
     Ok(WasmOutput {
-        payload,
+        fuel_used,
         hash,
         tree,
+        payload,
     })
 }

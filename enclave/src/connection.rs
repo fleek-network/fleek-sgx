@@ -109,6 +109,9 @@ struct ServiceResponseHeader {
     #[serde(with = "hex")]
     input_hash: [u8; 32],
 
+    /// Amount of fuel used in the request
+    fuel_used: u64,
+
     /// Hex-encoded blake3 hash for the output
     #[serde(with = "hex")]
     output_hash: [u8; 32],
@@ -124,7 +127,7 @@ struct ServiceResponseHeader {
     signature: [u8; 65],
 }
 
-fn tree_is_one_hash(tree: &[u8]) -> bool {
+const fn tree_is_one_hash(tree: &[u8]) -> bool {
     tree.len() == 32
 }
 
@@ -134,18 +137,27 @@ impl ServiceResponseHeader {
     /// ## Pseudo-code
     ///
     /// ```text
-    /// hash = Sha256( "INPUT_HASH" . input hash . "OUTPUT_HASH" . output hash )
+    /// hash = Sha256(
+    ///     "INPUT_HASH" . input hash .
+    ///     "FUEL_USED" . be u64 .
+    ///     "OUTPUT_HASH" . output hash
+    /// )
     /// signature = shared_key.sign(hash)
     /// ```
-    fn sign(
-        input_hash: [u8; 32],
+    fn sign_request(
+        req: &ServiceRequest,
+        fuel_used: u64,
         output_hash: [u8; 32],
         output_tree: Vec<u8>,
         shared_seal_key: &SealKeyPair,
     ) -> Self {
+        let input_hash = req.hash_parameters();
+
         let mut hasher = Sha256::new();
         hasher.update(b"INPUT_HASH");
         hasher.update(input_hash);
+        hasher.update(b"FUEL_USED");
+        hasher.update(u64::to_be_bytes(fuel_used));
         hasher.update(b"OUTPUT_HASH");
         hasher.update(output_hash);
         let hash = hasher.finalize();
@@ -163,9 +175,10 @@ impl ServiceResponseHeader {
         signature[64] = v.into();
 
         Self {
-            output_tree,
-            output_hash,
             input_hash,
+            fuel_used,
+            output_hash,
+            output_tree,
             signature,
         }
     }
@@ -236,13 +249,13 @@ fn handle_connection(
     // Read and parse payload
     let mut payload = vec![0; len];
     conn.read_exact(&mut payload)?;
-    let req: ServiceRequest = serde_json::from_slice(&payload)?;
+    let request: ServiceRequest = serde_json::from_slice(&payload)?;
 
     // Fetch content from blockstore
-    let (hash, mut module) = blockstore::get_verified_content(&req.hash)?;
+    let (hash, mut module) = blockstore::get_verified_content(&request.hash)?;
 
     // Optionally decrypt the module
-    if req.decrypt {
+    if request.decrypt {
         module = ecies::decrypt(&shared_seal_key.secret.to_bytes(), &module)?;
     }
 
@@ -252,16 +265,17 @@ fn handle_connection(
     let output = crate::runtime::execute_module(
         hash,
         module,
-        req.fuel,
-        &req.function,
-        req.input.as_bytes(),
+        request.fuel,
+        &request.function,
+        request.input.as_bytes(),
         shared_seal_key.clone(),
         debug_print,
     )?;
 
     // Sign and construct output header
-    let signed_header = ServiceResponseHeader::sign(
-        req.hash_parameters(),
+    let signed_header = ServiceResponseHeader::sign_request(
+        &request,
+        output.fuel_used,
         output.hash.into(),
         output.tree.into_iter().flatten().collect(),
         &shared_seal_key,
