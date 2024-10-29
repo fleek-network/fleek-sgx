@@ -22,6 +22,7 @@ pub struct WasmOutput {
 pub fn execute_module(
     hash: [u8; 32],
     module: impl AsRef<[u8]>,
+    fuel: u64,
     name: &str,
     input: &[u8],
     shared_secret_key: Arc<SealKeyPair>,
@@ -39,12 +40,16 @@ pub fn execute_module(
             initial_value_stack_height: 512 << 10, // 512 KiB
             maximum_value_stack_height: 5 << 20,   // 5 MiB
             maximum_recursion_depth: 65535,
-        });
+        })
+        .consume_fuel(true);
     let engine = Engine::new(&config);
+
+    // Setup wasm store with host state and requested fuel limit
     let mut store = Store::new(
         &engine,
         HostState::new(shared_secret_key, hash, input, debug_print),
     );
+    store.set_fuel(fuel).expect("fuel meter to be enabled");
 
     // Setup linker and define the host functions
     let mut linker = <Linker<HostState>>::new(&engine);

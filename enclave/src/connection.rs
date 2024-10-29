@@ -6,9 +6,10 @@ use std::sync::{Arc, Condvar, Mutex};
 use anyhow::bail;
 use bytes::BufMut;
 use libsecp256k1::Signature;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::config::MAX_FUEL_LIMIT;
 use crate::error::EnclaveError;
 use crate::seal_key::SealKeyPair;
 use crate::{blockstore, config};
@@ -26,7 +27,10 @@ struct ServiceRequest<'a> {
     /// Fuel limit to set. Defaults to the maximum instruction count.
     /// Node can implement a check against the client balance to be
     /// able to pay for the computation or not.
-    #[serde(default = "ServiceRequest::max_fuel_limit")]
+    #[serde(
+        default = "ServiceRequest::max_fuel_limit",
+        deserialize_with = "de_fuel"
+    )]
     fuel: u64,
 
     /// Entrypoint function to call. Defaults to `main` if not set.
@@ -36,6 +40,18 @@ struct ServiceRequest<'a> {
     /// Input data string.
     #[serde(default)]
     input: Cow<'a, str>,
+}
+
+/// Deserialize fuel u64, and ensure it's less than configured fuel limit
+fn de_fuel<'de, D: Deserializer<'de>>(de: D) -> Result<u64, D::Error> {
+    let n = u64::deserialize(de)?;
+    if n <= MAX_FUEL_LIMIT {
+        Ok(n)
+    } else {
+        Err(serde::de::Error::custom(format!(
+            "requested fuel limit greater than maximum ({MAX_FUEL_LIMIT})"
+        )))
+    }
 }
 
 impl ServiceRequest<'_> {
@@ -73,7 +89,7 @@ impl ServiceRequest<'_> {
         hasher.update([self.decrypt as u8]);
         // Big endian encoded 128 bit fuel limit
         hasher.update(b"FUEL_LIMIT");
-        hasher.update(self.fuel.to_be_bytes());
+        hasher.update(u64::to_be_bytes(self.fuel));
         // Function name to call
         hasher.update(b"FUNCTION_NAME");
         hasher.update((self.function.len() as u8).to_be_bytes());
@@ -236,6 +252,7 @@ fn handle_connection(
     let output = crate::runtime::execute_module(
         hash,
         module,
+        req.fuel,
         &req.function,
         req.input.as_bytes(),
         shared_seal_key.clone(),

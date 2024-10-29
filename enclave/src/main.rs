@@ -13,13 +13,22 @@ mod runtime;
 mod seal_key;
 
 pub(crate) mod config {
+    /// Maximum size of blockstore content
     pub const MAX_BLOCKSTORE_SIZE: usize = 16 << 20; // 16 MiB
+    /// Maxmimum fuel limit allowed to be set by the client
+    pub const MAX_FUEL_LIMIT: u64 = 10 << 32; // 40 Billion
+    /// Maximum size of input parameter
     pub const MAX_INPUT_SIZE: usize = 8 << 20; // 8 MiB
+    /// Maximum size of wasm output
     pub const MAX_OUTPUT_SIZE: usize = 16 << 20; // 16 MiB
+    /// Maximum number of concurrent wasm threads.
+    /// Must not exceed threads reserved for enclave.
     pub const MAX_CONCURRENT_WASM_THREADS: usize = 128;
-    pub const MAX_FUEL_LIMIT: u64 = 10 << 32; // 40 billion
+    /// TLS key size
     pub const TLS_KEY_SIZE: usize = 2048;
+    /// MTLS port to listen on for incoming enclave requests
     pub const MTLS_PORT: u16 = 55855;
+    /// TLS port to listen on for incoming public key requests
     pub const TLS_PORT: u16 = 55856;
 }
 
