@@ -13,7 +13,7 @@ use crate::verifier::RemoteAttestationVerifier;
 pub fn connect_mtls<C>(
     mr_enclave: MREnclave,
     collateral_provider: C,
-    server_ip: String,
+    server_ip: &str,
     server_port: u16,
     key: PrivateKey,
     cert: Certificate,
@@ -36,9 +36,8 @@ where
 
     config.key_log = Arc::new(rustls::KeyLogFile::new());
 
-    let server_name = ServerName::IpAddress(
-        IpAddr::try_from(server_ip.as_ref()).context("Failed to parse IP address")?,
-    );
+    let server_name =
+        ServerName::IpAddress(IpAddr::try_from(server_ip).context("Failed to parse IP address")?);
     let conn = ClientConnection::new(Arc::new(config), server_name)?;
     let sock = TcpStream::connect(format!("{server_ip}:{server_port}"))?;
     let tls = StreamOwned::new(conn, sock);

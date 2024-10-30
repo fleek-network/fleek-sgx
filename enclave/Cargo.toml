@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# Argument parsing
+bpaf = { version = "=0.9.15", features = ["derive"]}
+
 # WASM Runtime
 wasmi = "=0.38.0"
 

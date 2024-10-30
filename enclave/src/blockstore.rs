@@ -6,7 +6,7 @@ use arrayref::array_ref;
 use blake3_tree::blake3::tree::BlockHasher;
 use blake3_tree::IncrementalVerifier;
 
-use crate::config;
+use crate::args::ARGS;
 
 const LEADING_BIT: u32 = 1 << 31;
 
@@ -51,7 +51,7 @@ pub fn get_verified_content(hash: &str) -> anyhow::Result<([u8; 32], Vec<u8>)> {
             hasher.update(&payload);
             iv.verify(hasher)?;
 
-            if content.len() + payload.len() >= config::MAX_BLOCKSTORE_SIZE {
+            if content.len() + payload.len() >= ARGS.wasm_config.max_blockstore_size {
                 bail!("blockstore content too large")
             }
 

@@ -4,11 +4,12 @@ use ra_verify::types::report::MREnclave;
 
 use super::codec::{Codec, FramedStream, Request, Response};
 use super::collateral_prov::EnclaveCollateralProvider;
+use crate::args::ARGS;
 use crate::error::EnclaveError;
 use crate::seal_key::SealKeyPair;
 
 pub fn get_secret_key_from_peers(
-    peers: Vec<String>,
+    peers: &[String],
     tls_private_key: &[u8],
     tls_cert: &[u8],
     our_mrenclave: MREnclave,
@@ -19,7 +20,7 @@ pub fn get_secret_key_from_peers(
             our_mrenclave,
             EnclaveCollateralProvider::default(),
             peer,
-            crate::config::MTLS_PORT,
+            ARGS.tls_config.mtls_port,
             tls_private_key.to_vec(),
             tls_cert.to_vec(),
         ) {

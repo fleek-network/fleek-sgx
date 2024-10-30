@@ -1,7 +1,6 @@
 #[derive(Debug)]
 pub enum EnclaveError {
     FailedToFetchSharedKey,
-    NoPeersProvided,
     GeneratedBadSharedKey,
     EGetKeyFailed,
     FailedToGenerateTlsKey,
@@ -10,7 +9,5 @@ pub enum EnclaveError {
     FailedToBuildTlsConfig,
     TlsServerError,
     RunnerConnectionFailed,
-    InvalidArgs,
-    BadSavedKey,
     MaxQuoteSizeExceeded,
 }

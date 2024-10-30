@@ -131,6 +131,7 @@ pub mod fn0 {
     use wasmi::Caller;
 
     use super::HostState;
+    use crate::args::ARGS;
 
     /// Alias for the ctx context
     type Ctx<'a> = Caller<'a, HostState>;
@@ -220,7 +221,7 @@ pub mod fn0 {
         let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
         let (memory, state) = memory.data_and_store_mut(&mut ctx);
 
-        if state.output.len() > crate::config::MAX_OUTPUT_SIZE {
+        if state.output.len() > ARGS.wasm_config.max_output_size {
             return HostError::OutOfBounds as i32;
         }
 

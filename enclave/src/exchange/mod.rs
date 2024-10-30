@@ -7,7 +7,7 @@ use ra_tls::EncodeRsaPublicKey;
 use sgx_isa::{Keyname, Keypolicy, Keyrequest, Report};
 use sha2::Digest;
 
-use crate::config;
+use crate::args::{SharedSecretMethod, ARGS};
 use crate::error::EnclaveError;
 use crate::req_res::{generate_for_report_data, save_sealed_key};
 use crate::seal_key::SealKeyPair;
@@ -27,19 +27,13 @@ pub struct Enclave {
     pub tls_cert: Vec<u8>,
 }
 
-pub enum SharedSecretMethod {
-    InitialNode,
-    SealedOnDisk(Vec<u8>),
-    FetchFromPeers(Vec<String>),
-}
-
 pub fn init() -> Result<Enclave, EnclaveError> {
     let report = Report::for_self();
     let seal_key = get_seal_key(&report)?;
 
     // Generate key for TLS certificate
-    let (priv_key_tls, pub_key_tls) =
-        generate_key(config::TLS_KEY_SIZE).map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
+    let (priv_key_tls, pub_key_tls) = generate_key(ARGS.tls_config.tls_key_size)
+        .map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
 
     // Append a public key to the report data for the quote
     let mut hasher = sha2::Sha256::new();
@@ -68,11 +62,11 @@ pub fn init() -> Result<Enclave, EnclaveError> {
         },
         // 1 year
         Duration::from_secs(31536000),
-        get_our_ip()?,
+        ARGS.tls_config.our_ip.to_string(),
     )
     .map_err(|_| EnclaveError::FailedToGenerateTlsKey)?;
 
-    let shared_seal_key = Arc::new(match get_shared_secret_method()? {
+    let shared_seal_key = Arc::new(match &ARGS.shared_secret_method {
         // We already have previously recieved the secret key just need to unencrypt it
         SharedSecretMethod::SealedOnDisk(encoded_secret_key) => {
             println!("Recovering seal key from disk");
@@ -152,47 +146,6 @@ fn get_seal_key(report: &Report) -> Result<SealKeyPair, EnclaveError> {
     .map_err(|_| EnclaveError::EGetKeyFailed)?;
 
     Ok(SealKeyPair::from_seed_key(key))
-}
-
-fn get_our_ip() -> Result<String, EnclaveError> {
-    let args = std::env::args();
-
-    for arg in args {
-        if arg.starts_with("--our-ip") {
-            return Ok(arg
-                .split("=")
-                .last()
-                .ok_or(EnclaveError::InvalidArgs)?
-                .to_string());
-        }
-    }
-    panic!("Our ip was not passed to enclave");
-}
-
-fn get_shared_secret_method() -> Result<SharedSecretMethod, EnclaveError> {
-    let args = std::env::args();
-
-    for arg in args {
-        if arg.starts_with("--encoded-secret-key") {
-            let hex_encoded_key = arg
-                .split('=')
-                .last()
-                .ok_or(EnclaveError::InvalidArgs)?
-                .to_string();
-
-            let key_bytes = hex::decode(hex_encoded_key).map_err(|_| EnclaveError::BadSavedKey)?;
-            return Ok(SharedSecretMethod::SealedOnDisk(key_bytes));
-        } else if arg.starts_with("--peer-ips") {
-            let ips = arg.split("=").last().ok_or(EnclaveError::InvalidArgs)?;
-
-            return Ok(SharedSecretMethod::FetchFromPeers(
-                ips.split(",").map(|ip| ip.to_string()).collect(),
-            ));
-        } else if arg.starts_with("--initial-node") {
-            return Ok(SharedSecretMethod::InitialNode);
-        }
-    }
-    Err(EnclaveError::NoPeersProvided)
 }
 
 fn initialize_shared_secret_key() -> Result<SealKeyPair, EnclaveError> {

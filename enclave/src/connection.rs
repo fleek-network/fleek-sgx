@@ -9,10 +9,10 @@ use libsecp256k1::Signature;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::config::MAX_FUEL_LIMIT;
+use crate::args::ARGS;
+use crate::blockstore;
 use crate::error::EnclaveError;
 use crate::seal_key::SealKeyPair;
-use crate::{blockstore, config};
 
 /// Client request to the service
 #[derive(Serialize, Deserialize)]
@@ -45,19 +45,21 @@ struct ServiceRequest<'a> {
 /// Deserialize fuel u64, and ensure it's less than configured fuel limit
 fn de_fuel<'de, D: Deserializer<'de>>(de: D) -> Result<u64, D::Error> {
     let n = u64::deserialize(de)?;
-    if n <= MAX_FUEL_LIMIT {
+    let max = ARGS.wasm_config.max_fuel_limit;
+    if n <= max {
         Ok(n)
     } else {
         Err(serde::de::Error::custom(format!(
-            "requested fuel limit greater than maximum ({MAX_FUEL_LIMIT})"
+            "requested fuel limit greater than maximum ({max})"
         )))
     }
 }
 
 impl ServiceRequest<'_> {
     /// Maximum and default fuel limit (~40 Billion)
-    const fn max_fuel_limit() -> u64 {
-        crate::config::MAX_FUEL_LIMIT
+    #[inline(always)]
+    fn max_fuel_limit() -> u64 {
+        ARGS.wasm_config.max_fuel_limit
     }
 
     /// Default function name to run (`main`)
@@ -185,18 +187,16 @@ impl ServiceResponseHeader {
 }
 
 pub fn start_handshake_server(shared_seal_key: Arc<SealKeyPair>) -> Result<(), EnclaveError> {
-    // check if debug printing should be enabled
-    let debug_print = std::env::args().any(|v| v == "--debug");
-
     // bind to userspace address for incoming requests from handshake
     let listener = TcpListener::bind("requests.fleek.network")
         .map_err(|_| EnclaveError::RunnerConnectionFailed)?;
-    let semaphore = Arc::new(Semaphore::new(config::MAX_CONCURRENT_WASM_THREADS));
+    let semaphore = Arc::new(Semaphore::new(ARGS.wasm_config.max_concurrent_wasm_threads));
 
     // Setup a worker thread to spawn connection threads
     let (tx, rx) = std::sync::mpsc::sync_channel::<TcpStream>(2048);
     let shared_seal_key = shared_seal_key.clone();
     let semaphore = semaphore.clone();
+    let debug_print = ARGS.wasm_config.debug;
     std::thread::spawn(move || {
         while let Ok(mut conn) = rx.recv() {
             let shared_seal_key = shared_seal_key.clone();
@@ -242,7 +242,7 @@ fn handle_connection(
     conn.read_exact(&mut buf)?;
     let len = u32::from_be_bytes(buf) as usize;
 
-    if len >= config::MAX_INPUT_SIZE {
+    if len >= ARGS.wasm_config.max_input_size {
         bail!("input too large");
     }
 
