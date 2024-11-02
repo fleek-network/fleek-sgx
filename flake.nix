@@ -1,12 +1,9 @@
 {
-  description = "Fleek Remote Attestations";
+  description = "Fleek SGX";
 
   inputs = {
     nixpkgs.url = "github:ozwaldorf/nixpkgs/sgx";
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -111,15 +108,34 @@
 
           packages = rec {
             default = fn-sgx-enclave;
-            fn-sgx-enclave = craneLib.buildPackage (
-              commonArgs
-              // {
-                inherit cargoArtifacts;
-                pname = "fn-sgx-enclave";
-                doCheck = false;
-                cargoExtraArgs = "--locked --bin fleek-service-sgx-enclave";
-              }
-            );
+            fn-sgx-enclave =
+              let
+                # SGXS binary stream parameters
+                ENCLAVE_HEAP = "0x100000000";
+                ENCLAVE_STACK = "0x200000";
+                ENCLAVE_THREADS = "134";
+                TARGET = "target/x86_64-fortanix-unknown-sgx/release/fleek-service-sgx-enclave";
+              in
+              craneLib.buildPackage (
+                commonArgs
+                // {
+                  inherit cargoArtifacts;
+                  pname = "fn-sgx-enclave";
+                  doCheck = false;
+                  cargoExtraArgs = "--locked --bin fleek-service-sgx-enclave";
+                  installPhase = ''
+                    # Convert elf to sgxs with our parameters
+                    ftxsgx-elf2sgxs ${TARGET} \
+                        --heap-size ${ENCLAVE_HEAP} \
+                        --stack-size ${ENCLAVE_STACK} \
+                        --threads ${ENCLAVE_THREADS}
+
+                    # Install to output dir
+                    mkdir -p $out
+                    mv ${TARGET}.sgxs $out/enclave.sgxs
+                  '';
+                }
+              );
           };
 
           # Allow using `nix develop` on the project
