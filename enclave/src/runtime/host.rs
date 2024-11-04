@@ -142,18 +142,20 @@ pub mod fn0 {
     /// Various host errors
     #[repr(i32)]
     enum HostError {
+        /// Insufficient balance to complete the request
+        InsufficientBalance = -1,
         /// Specified pointers were out of bounds
-        OutOfBounds = -1,
+        OutOfBounds = -2,
         /// Invalid key derivation path
-        KeyDerivationInvalidPath = -2,
+        KeyDerivationInvalidPath = -3,
         /// Key derivation error
-        KeyDerivation = -3,
+        KeyDerivation = -4,
         /// Invalid permission header for shared key
-        UnsealInvalidPermissionHeader = -4,
+        UnsealInvalidPermissionHeader = -5,
         /// Current wasm is not approved to access global content
-        UnsealPermissionDenied = -5,
+        UnsealPermissionDenied = -6,
         /// Sealed data could not be decrypted
-        UnsealFailed = -6,
+        UnsealFailed = -7,
         /// Unexpected error
         #[allow(unused)]
         Unexpected = -99,
@@ -164,12 +166,21 @@ pub mod fn0 {
     /// # Returns
     ///
     /// Length of the input data slice.
-    pub fn input_data_size(ctx: Ctx) -> u32 {
+    pub fn input_data_size(mut ctx: Ctx) -> u32 {
+        // Charge fuel
+        let cost = 1;
+        let fuel = ctx.get_fuel().unwrap();
+        ctx.set_fuel(fuel - cost).unwrap();
+
         ctx.data().input.len() as u32
     }
 
     /// Copies data from the input into a memory location. Use
     /// [`fn0.input_data_size`](input_data_size) to get the length.
+    ///
+    /// # Fuel cost
+    ///
+    /// `1 * len`
     ///
     /// # Parameters
     ///
@@ -186,6 +197,13 @@ pub mod fn0 {
         let offset = offset as usize;
         let size = len as usize;
 
+        // Check fuel
+        let cost = len as u64;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
+
         // SAFETY: We ensure this exists before running anything
         let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
         let (memory, state) = memory.data_and_store_mut(&mut ctx);
@@ -199,10 +217,17 @@ pub mod fn0 {
 
         region.copy_from_slice(buffer);
 
+        // Charge fuel
+        ctx.set_fuel(fuel - cost).unwrap();
+
         0
     }
 
     /// Copy some bytes from memory and append them into the output buffer.
+    ///
+    /// # Fuel cost
+    ///
+    /// `2 * len`
     ///
     /// # Parameters
     ///
@@ -216,6 +241,13 @@ pub mod fn0 {
     pub fn output_data_append(mut ctx: Ctx, ptr: u32, len: u32) -> i32 {
         let ptr = ptr as usize;
         let len = len as usize;
+
+        // Check fuel
+        let cost = 2 * len as u64;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
 
         // SAFETY: We ensure this exists before running anything
         let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
@@ -233,6 +265,9 @@ pub mod fn0 {
         state.hasher.update(region);
         state.output.put_slice(region);
 
+        // Charge fuel
+        ctx.set_fuel(fuel - cost).unwrap();
+
         0
     }
 
@@ -245,6 +280,10 @@ pub mod fn0 {
 
     /// Get the current shared bip32 extended key, encoded as utf8 xpub (112 bytes)
     ///
+    /// # Fuel cost
+    ///
+    /// `10`
+    ///
     /// # Parameters
     ///
     /// * `buf_ptr`: Memory offset to write 112 byte xpub key to
@@ -255,6 +294,13 @@ pub mod fn0 {
     /// * `<0`: Host error
     pub fn shared_key_public(mut ctx: Ctx, buf_ptr: u32) -> i32 {
         let buf_ptr = buf_ptr as usize;
+
+        // Check fuel
+        let cost = 10;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
 
         let memory = ctx.get_export("memory").unwrap().into_memory().unwrap();
         let (memory, state) = memory.data_and_store_mut(&mut ctx);
@@ -272,6 +318,10 @@ pub mod fn0 {
     }
 
     /// Unseal a section of memory in-place using the shared extended key.
+    ///
+    /// # Fuel cost
+    ///
+    /// `1000 + 4 * cipher_len`
     ///
     /// # Handling permissions
     ///
@@ -296,6 +346,13 @@ pub mod fn0 {
     pub fn shared_key_unseal(mut ctx: Ctx, cipher_ptr: u32, cipher_len: u32) -> i32 {
         let cipher_ptr = cipher_ptr as usize;
         let cipher_len = cipher_len as usize;
+
+        // Check fuel
+        let cost = 1000 * 4 * cipher_len as u64;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
 
         // If we cant fit the length inside an i32, return an error
         if cipher_len > i32::MAX as usize {
@@ -351,12 +408,19 @@ pub mod fn0 {
         // Write over the encrypted content. Decrypted content will always be shorter than encrypted
         ciphertext[..plaintext.len()].copy_from_slice(&plaintext);
 
+        // Charge fuel
+        ctx.set_fuel(fuel - cost).unwrap();
+
         // SAFETY: we return out of bounds earlier if the (bigger) encrypted
         //         content length will not fit inside an i32
         plaintext.len() as i32
     }
 
     /// Write the raw compressed secp256k1 public key of a derived key to a buffer
+    ///
+    /// # Fuel cost
+    ///
+    /// `10`
     ///
     /// # Parameters
     ///
@@ -381,6 +445,13 @@ pub mod fn0 {
         let path_ptr = path_ptr as usize;
         let path_len = path_len as usize;
         let buf_ptr = buf_ptr as usize;
+
+        // Check fuel
+        let cost = 10;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
 
         // Error if path length is greater than 256, or odd
         if path_len > 256 || path_len % 2 != 0 {
@@ -415,11 +486,18 @@ pub mod fn0 {
         };
         slice.copy_from_slice(&key.public.public_key().to_bytes());
 
+        // Charge fuel
+        ctx.set_fuel(fuel - cost).unwrap();
+
         0
     }
 
     /// Derive a wasm specific key from the shared key, with a given path up to `[u16; 128]`, and
     /// unseal encrypted data with it.
+    ///
+    /// # Fuel cost
+    ///
+    /// `1000 + 4 * cipher_len`
     ///
     /// # Parameters
     ///
@@ -443,6 +521,13 @@ pub mod fn0 {
         let path_len = path_len as usize;
         let cipher_ptr = cipher_ptr as usize;
         let cipher_len = cipher_len as usize;
+
+        // Check fuel
+        let cost = 1000 + 4 * cipher_len as u64;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
 
         // Error if path length is greater than 256, or odd
         if path_len > 256 || path_len % 2 != 0 {
@@ -478,6 +563,9 @@ pub mod fn0 {
         // Write over the encrypted content. Decrypted content will always be shorter than encrypted
         ciphertext[..plaintext.len()].copy_from_slice(&plaintext);
 
+        // Charge fuel
+        ctx.set_fuel(fuel - cost).unwrap();
+
         // SAFETY: we return out of bounds earlier if the (bigger) encrypted
         //         content length will not fit inside an i32
         plaintext.len() as i32
@@ -485,6 +573,10 @@ pub mod fn0 {
 
     /// Derive a wasm specific key from the shared key, with a given path up to `[u16; 128]`, and
     /// sign a 32 byte digest with it.
+    ///
+    /// # Fuel cost
+    ///
+    /// `500`
     ///
     /// # Parameters
     ///
@@ -507,8 +599,14 @@ pub mod fn0 {
         let path_ptr = path_ptr as usize;
         let path_len = path_len as usize;
         let digest_ptr = digest_ptr as usize;
-
         let signature_buf_ptr = signature_buf_ptr as usize;
+
+        // Check fuel
+        let cost = 500;
+        let fuel = ctx.get_fuel().unwrap();
+        if cost > fuel {
+            return HostError::InsufficientBalance as i32;
+        }
 
         // Error if path length is greater than 256, or odd
         if path_len > 256 || path_len % 2 != 0 {
@@ -549,6 +647,9 @@ pub mod fn0 {
         signature_buf[32..64].copy_from_slice(&s.b32());
         signature_buf[64] = v.serialize();
 
+        // Charge fuel
+        ctx.set_fuel(fuel - cost).unwrap();
+
         0
     }
 
@@ -558,6 +659,10 @@ pub mod fn0 {
     /// such as validating certificates, nonces, etc. This operation is
     /// *NOT* monotonic, so subsequent calls may return a smaller value
     /// than the previous call.
+    ///
+    /// # Fuel cost
+    ///
+    /// `0`
     ///
     /// # Returns
     ///
@@ -575,6 +680,10 @@ pub mod fn0 {
 
     /// When enclave is started with debug flag, enables printing a valid utf8 string to stdout on
     /// the host. No-op when debug is disabled, or input is invalid.
+    ///
+    /// # Fuel cost
+    ///
+    /// `0`
     ///
     /// # Parameters
     ///
