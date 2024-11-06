@@ -11,15 +11,14 @@ Untrusted/Runner code can be found in the lightning repo [here](https://github.c
         - [`ra-verify/`](./lib/ra-verify): Verifing remote attestations implemented via RustCrypto
     - [`enclave/`](./service/enclave): Trusted enclave for WASM TEE
 
-## Build Requirements
+## Reproducable enclave
 
-Required cargo packages:
-- `cargo install fortanix-sgx-tools`
+> Requires nix with flake support enabled
 
-Optional cargo packages:
-- `cargo install sgxs-tools`
+```sh
+# Build the enclave
+nix build
 
-Required system packages:
-- `openssl`
-- `protobuf`
-- `libsgx-dcap-default-qpl` OR any library providing `libdcap_quoteprov.so`
+# Hash the result
+b3sum result/enclave.sgxs
+```
