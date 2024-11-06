@@ -29,6 +29,8 @@ fn main() -> Result<(), EnclaveError> {
 
     // Start mutual TLS server for communication with the enclaves on the other nodes
     let our_mrenclave = report.mrenclave;
+    println!("Finished initialization for MRENCLAVE: {}", hex::encode(our_mrenclave));
+
     let server_config = build_config_mtls(
         tls_secret_key.clone(),
         tls_cert.clone(),
