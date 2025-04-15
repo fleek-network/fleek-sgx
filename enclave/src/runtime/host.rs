@@ -2,9 +2,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bip32::ChildNumber;
-use blake3_tree::blake3::tree::{HashTree, HashTreeBuilder};
 use bytes::{Bytes, BytesMut};
 
+use crate::b3_verify::hasher::byte_hasher::Blake3Hasher;
 use crate::seal_key::SealKeyPair;
 
 /// Runtime host state
@@ -13,7 +13,7 @@ pub struct HostState {
     hash: [u8; 32],
     input: Bytes,
     output: BytesMut,
-    hasher: HashTreeBuilder,
+    hasher: Blake3Hasher,
     debug_print: bool,
 }
 
@@ -24,13 +24,14 @@ impl HostState {
             hash,
             input,
             output: BytesMut::new(),
-            hasher: HashTreeBuilder::new(),
+            hasher: Blake3Hasher::new(Vec::new()),
             debug_print,
         }
     }
 
-    pub fn finalize(self) -> (HashTree, Bytes) {
-        (self.hasher.finalize(), self.output.freeze())
+    pub fn finalize(self) -> (Vec<[u8; 32]>, [u8; 32], Bytes) {
+        let (tree, hash) = self.hasher.finalize_tree();
+        (tree, hash, self.output.freeze())
     }
 
     /// Derive a non-hardened, wasm module specific bip32 key pair from the shared extended key.
@@ -125,13 +126,13 @@ pub mod fn0 {
 
     use arrayref::array_ref;
     use bip32::PublicKey;
-    use blake3_tree::blake3::tree::HashTreeBuilder;
     use bytes::{Buf, BufMut, Bytes};
     use libsecp256k1::Signature;
     use wasmi::Caller;
 
     use super::HostState;
     use crate::args::ARGS;
+    use crate::b3_verify::hasher::byte_hasher::Blake3Hasher;
 
     /// Alias for the ctx context
     type Ctx<'a> = Caller<'a, HostState>;
@@ -274,7 +275,7 @@ pub mod fn0 {
     /// Clear output data buffer, for example to be used to write an error mid stream
     pub fn output_data_clear(mut ctx: Ctx) {
         let state = ctx.data_mut();
-        state.hasher = HashTreeBuilder::new();
+        state.hasher = Blake3Hasher::new(Vec::new());
         state.output.clear();
     }
 

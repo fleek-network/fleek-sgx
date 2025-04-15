@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Condvar, Mutex};
 
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use bytes::BufMut;
 use libsecp256k1::Signature;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -250,9 +250,14 @@ fn handle_connection(
     let mut payload = vec![0; len];
     conn.read_exact(&mut payload)?;
     let request: ServiceRequest = serde_json::from_slice(&payload).context("invalid request")?;
+    let hash: [u8; 32] = hex::decode(request.hash.as_bytes())
+        .context("invalid hash")?
+        .try_into()
+        .map_err(|_| anyhow!("invalid hash length"))?;
 
     // Fetch content from blockstore
-    let (hash, mut module) = blockstore::get_verified_content(&request.hash)?;
+    let (hash, mut module) =
+        blockstore::get_verified_content(hash.as_slice().try_into().context("invalid hash")?)?;
 
     // Optionally decrypt the module
     if request.decrypt {
@@ -277,7 +282,7 @@ fn handle_connection(
     let signed_header = ServiceResponseHeader::sign_request(
         &request,
         output.fuel_used,
-        output.hash.into(),
+        output.hash,
         output.tree.into_iter().flatten().collect(),
         &shared_seal_key,
     );

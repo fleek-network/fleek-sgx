@@ -6,6 +6,7 @@ use crate::exchange::collateral_prov::EnclaveCollateralProvider;
 use crate::exchange::Enclave;
 
 mod args;
+mod b3_verify;
 mod blockstore;
 mod connection;
 mod error;
@@ -29,7 +30,10 @@ fn main() -> Result<(), EnclaveError> {
 
     // Start mutual TLS server for communication with the enclaves on the other nodes
     let our_mrenclave = report.mrenclave;
-    println!("Finished initialization for MRENCLAVE: {}", hex::encode(our_mrenclave));
+    println!(
+        "Finished initialization for MRENCLAVE: {}",
+        hex::encode(our_mrenclave)
+    );
 
     let server_config = build_config_mtls(
         tls_secret_key.clone(),

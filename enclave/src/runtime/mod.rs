@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
-use blake3_tree::blake3::tree::HashTree;
-use blake3_tree::blake3::Hash;
 use bytes::Bytes;
 use wasmi::{Config, Engine, Linker, Module, Store};
 
@@ -15,7 +13,7 @@ mod host;
 #[allow(unused)]
 pub struct WasmOutput {
     pub fuel_used: u64,
-    pub hash: Hash,
+    pub hash: [u8; 32],
     pub tree: Vec<[u8; 32]>,
     pub payload: Bytes,
 }
@@ -78,9 +76,9 @@ pub fn execute_module(
     let fuel_after = store.get_fuel().expect("metering to be enabled");
     let fuel_used = fuel - fuel_after;
 
-    let (HashTree { hash, tree }, payload) = store.into_data().finalize();
+    let (tree, hash, payload) = store.into_data().finalize();
 
-    println!("wasm output: {hash}");
+    println!("wasm output: {}", hex::encode(hash));
 
     Ok(WasmOutput {
         fuel_used,
