@@ -27,7 +27,7 @@ impl TcbInfoAndSignature {
         let sig = p256::ecdsa::Signature::from_slice(&self.signature).unwrap();
         public_key
             .verify(self.tcb_info_raw.get().as_bytes(), &sig)
-            .expect("valid signature, bitch");
+            .expect("valid signature");
 
         let tcb_info: TcbInfo =
             serde_json::from_str(self.tcb_info_raw.get()).context("tcb info")?;
